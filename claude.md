@@ -18,6 +18,12 @@ VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targe
 - [x] Linker script (linker.ld) - Memory layout for QEMU virt
 - [x] Makefile - Builds and runs in QEMU
 - [x] Boots successfully! Prints to serial console.
+- [x] Memory management (kernel/memory.c) - malloc/free working, 255MB heap
+- [x] String functions (kernel/string.c) - memcpy, strlen, strcmp, etc.
+- [x] Printf (kernel/printf.c) - %d, %s, %x, %p working
+- [ ] Interrupts - GIC, timer, keyboard (NEXT)
+- [ ] Scheduler
+- [ ] Shell
 
 ## Architecture Decisions Made
 1. **Target**: QEMU virt machine, aarch64, Cortex-A72
@@ -62,6 +68,9 @@ Phase 4: GUI (Future)
 ### Key Files
 - boot/boot.S - Entry point, CPU init
 - kernel/kernel.c - Main kernel code
+- kernel/memory.c/.h - Heap allocator (malloc/free)
+- kernel/string.c/.h - String/memory functions
+- kernel/printf.c/.h - Printf implementation
 - linker.ld - Memory layout
 - Makefile - Build system
 
@@ -84,6 +93,10 @@ make run-nographic  # Terminal only
 | RAM | 256MB | Configurable, max 8GB |
 | Coreutils | ls cd pwd cat echo mkdir rm cp mv clear touch | The essentials |
 
+## Gotchas / Lessons Learned
+- **aarch64 va_list**: Can't pass va_list to helper functions easily. Inline the va_arg handling.
+- **QEMU virt machine**: Uses PL011 UART at 0x09000000, GIC at 0x08000000
+
 ## Session Log
 ### Session 1
 - Created project structure
@@ -91,3 +104,6 @@ make run-nographic  # Terminal only
 - Successfully booted in QEMU, UART output works
 - Decided on retro Mac aesthetic
 - Human confirmed: terminal-first approach, take it slow
+- Added memory management (heap allocator) - working
+- Added string functions and printf - working after fixing va_list issue
+- Next: Interrupts (GIC, timer, keyboard)
