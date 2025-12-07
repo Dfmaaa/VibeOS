@@ -151,20 +151,33 @@ static vfs_node_t *mem_lookup(const char *path) {
 
 // Initialize the filesystem
 void vfs_init(void) {
+    printf("[VFS] Initializing filesystem...\n");
+
     // Try to use FAT32
     if (fat32_init() == 0) {
         use_fat32 = 1;
+        printf("[VFS] Using FAT32 persistent storage\n");
 
         // Set initial cwd to /home/user if it exists, else /
-        if (fat32_is_dir("/home/user") == 1) {
+        printf("[VFS] Checking /home/user...\n");
+        int r1 = fat32_is_dir("/home/user");
+        printf("[VFS] /home/user is_dir = %d\n", r1);
+        if (r1 == 1) {
             strcpy(cwd_path, "/home/user");
-        } else if (fat32_is_dir("/home") == 1) {
-            strcpy(cwd_path, "/home");
         } else {
-            strcpy(cwd_path, "/");
+            printf("[VFS] Checking /home...\n");
+            int r2 = fat32_is_dir("/home");
+            printf("[VFS] /home is_dir = %d\n", r2);
+            if (r2 == 1) {
+                strcpy(cwd_path, "/home");
+            } else {
+                strcpy(cwd_path, "/");
+            }
         }
+        printf("[VFS] CWD set to: %s\n", cwd_path);
     } else {
         use_fat32 = 0;
+        printf("[VFS] FAT32 not available, using in-memory filesystem\n");
 
         // Create minimal in-memory filesystem
         inode_count = 0;
@@ -180,6 +193,8 @@ void vfs_init(void) {
 
         strcpy(cwd_path, "/");
     }
+
+    printf("[VFS] Filesystem ready! CWD: %s\n", cwd_path);
 }
 
 // Resolve a path to a node

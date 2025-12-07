@@ -77,6 +77,10 @@ $(BOOT_OBJ): $(BOOT_SRC) | $(BUILD_DIR)
 $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# virtio_blk needs -O0 to prevent optimization issues
+$(BUILD_DIR)/virtio_blk.o: $(KERNEL_DIR)/virtio_blk.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -O0 -c $< -o $@
+
 # Kernel assembly objects
 $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.S | $(BUILD_DIR)
 	$(CC) $(ASFLAGS) -c $< -o $@

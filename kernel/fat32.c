@@ -212,28 +212,58 @@ static int name_match(const char *name1, const char *name2) {
 }
 
 int fat32_init(void) {
+    printf("[FAT32] Initializing...\n");
+
     // Read boot sector
-    if (read_sector(0, sector_buf) < 0) {
+    printf("[FAT32] Reading boot sector...\n");
+    int ret = read_sector(0, sector_buf);
+    printf("[FAT32] read_sector returned %d\n", ret);
+    if (ret < 0) {
+        printf("[FAT32] Failed to read boot sector\n");
         return -1;
     }
 
+    printf("[FAT32] Sector read OK, parsing boot sector...\n");
+
     fat32_boot_t *boot = (fat32_boot_t *)sector_buf;
-    (void)boot;  // We read fields manually to avoid unaligned access
+
+    printf("[FAT32] boot ptr = %p, sector_buf = %p\n", boot, sector_buf);
+    printf("[FAT32] First bytes: %02x %02x %02x\n",
+           sector_buf[0], sector_buf[1], sector_buf[2]);
+
+    printf("[FAT32] Reading byte 11...\n");
+    uint8_t b11 = sector_buf[11];
+    printf("[FAT32] byte 11 = %02x\n", b11);
+    uint8_t b12 = sector_buf[12];
+    printf("[FAT32] byte 12 = %02x\n", b12);
 
     // Read fields manually to avoid unaligned access issues on ARM
-    uint8_t b11 = sector_buf[11];
-    uint8_t b12 = sector_buf[12];
     uint16_t bytes_per_sector = b11 | (b12 << 8);
+    printf("[FAT32] bytes_per_sector = %d\n", bytes_per_sector);
 
     uint8_t sectors_per_cluster = sector_buf[13];
+    printf("[FAT32] sectors_per_cluster = %d\n", sectors_per_cluster);
+
     uint16_t reserved_sectors = sector_buf[14] | (sector_buf[15] << 8);
+    printf("[FAT32] reserved_sectors = %d\n", reserved_sectors);
+
+    printf("[FAT32] reading num_fats...\n");
     uint8_t num_fats = sector_buf[16];
+    printf("[FAT32] num_fats = %d\n", num_fats);
 
+    printf("[FAT32] reading root_entry_count...\n");
+    printf("[FAT32] sector_buf[17]...\n");
     uint8_t b17 = sector_buf[17];
+    printf("[FAT32] b17 = %02x\n", b17);
+    printf("[FAT32] sector_buf[18]...\n");
     uint8_t b18 = sector_buf[18];
+    printf("[FAT32] b18 = %02x\n", b18);
     uint16_t root_entry_count = b17 | (b18 << 8);
+    printf("[FAT32] root_entry_count = %d\n", root_entry_count);
 
+    printf("[FAT32] reading fat_size_16...\n");
     uint16_t fat_size_16 = sector_buf[22] | (sector_buf[23] << 8);
+    printf("[FAT32] fat_size_16 = %d\n", fat_size_16);
 
     uint32_t fat_size_32 = sector_buf[36] | (sector_buf[37] << 8) |
                            (sector_buf[38] << 16) | (sector_buf[39] << 24);
@@ -241,13 +271,17 @@ int fat32_init(void) {
                             (sector_buf[46] << 16) | (sector_buf[47] << 24);
     uint32_t total_sectors_32 = sector_buf[32] | (sector_buf[33] << 8) |
                                 (sector_buf[34] << 16) | (sector_buf[35] << 24);
+    printf("[FAT32] fat_size_32=%d root_cluster=%d total_sectors=%d\n",
+           fat_size_32, root_cluster, total_sectors_32);
 
     // Verify this is FAT32
     if (bytes_per_sector != 512) {
+        printf("[FAT32] Unsupported sector size: %d\n", bytes_per_sector);
         return -1;
     }
 
     if (fat_size_16 != 0 || root_entry_count != 0) {
+        printf("[FAT32] Not a FAT32 filesystem\n");
         return -1;
     }
 
@@ -266,14 +300,23 @@ int fat32_init(void) {
     uint32_t data_sectors = total_sectors_32 - fs.data_start;
     fs.total_clusters = data_sectors / fs.sectors_per_cluster;
 
+    printf("[FAT32] Sectors/cluster: %d\n", fs.sectors_per_cluster);
+    printf("[FAT32] Reserved sectors: %d\n", fs.reserved_sectors);
+    printf("[FAT32] FAT size: %d sectors\n", fs.fat_size);
+    printf("[FAT32] Root cluster: %d\n", fs.root_cluster);
+    printf("[FAT32] Data start: sector %d\n", fs.data_start);
+    printf("[FAT32] Total clusters: %d\n", fs.total_clusters);
+
     // Allocate cluster buffer
     cluster_buf_size = fs.sectors_per_cluster * fs.bytes_per_sector;
     cluster_buf = malloc(cluster_buf_size);
     if (!cluster_buf) {
+        printf("[FAT32] Failed to allocate cluster buffer\n");
         return -1;
     }
 
     fs_initialized = 1;
+    printf("[FAT32] Filesystem ready!\n");
     return 0;
 }
 
