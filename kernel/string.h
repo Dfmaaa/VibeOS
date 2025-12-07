@@ -27,4 +27,7 @@ char *strdup(const char *s);
 // Case-insensitive compare (for our case-insensitive filesystem)
 int strcasecmp(const char *s1, const char *s2);
 
+// Tokenization
+char *strtok_r(char *str, const char *delim, char **saveptr);
+
 #endif

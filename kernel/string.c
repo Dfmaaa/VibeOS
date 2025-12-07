@@ -152,3 +152,50 @@ int strcasecmp(const char *s1, const char *s2) {
     }
     return tolower(*s1) - tolower(*s2);
 }
+
+// Check if character is in delimiter string
+static int is_delim(char c, const char *delim) {
+    while (*delim) {
+        if (c == *delim) return 1;
+        delim++;
+    }
+    return 0;
+}
+
+char *strtok_r(char *str, const char *delim, char **saveptr) {
+    char *start;
+    char *end;
+
+    if (str) {
+        start = str;
+    } else {
+        start = *saveptr;
+    }
+
+    if (!start) return NULL;
+
+    // Skip leading delimiters
+    while (*start && is_delim(*start, delim)) {
+        start++;
+    }
+
+    if (*start == '\0') {
+        *saveptr = NULL;
+        return NULL;
+    }
+
+    // Find end of token
+    end = start;
+    while (*end && !is_delim(*end, delim)) {
+        end++;
+    }
+
+    if (*end) {
+        *end = '\0';
+        *saveptr = end + 1;
+    } else {
+        *saveptr = NULL;
+    }
+
+    return start;
+}

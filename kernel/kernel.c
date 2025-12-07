@@ -12,6 +12,7 @@
 #include "console.h"
 #include "keyboard.h"
 #include "shell.h"
+#include "vfs.h"
 
 // QEMU virt machine PL011 UART base address
 #define UART0_BASE 0x09000000
@@ -122,8 +123,11 @@ void kernel_main(void) {
         console_puts("\n");
     }
 
-    // Try virtio-keyboard (debugging)
+    // Initialize keyboard (polling mode)
     keyboard_init();
+
+    // Initialize filesystem
+    vfs_init();
 
     printf("\n");
     printf("[KERNEL] Starting shell...\n");

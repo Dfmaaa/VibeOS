@@ -18,18 +18,21 @@ BUILD_DIR = build
 
 # Source files
 BOOT_SRC = $(BOOT_DIR)/boot.S
-KERNEL_SRCS = $(wildcard $(KERNEL_DIR)/*.c)
+KERNEL_C_SRCS = $(wildcard $(KERNEL_DIR)/*.c)
+KERNEL_S_SRCS = $(wildcard $(KERNEL_DIR)/*.S)
 
 # Object files
 BOOT_OBJ = $(BUILD_DIR)/boot.o
-KERNEL_OBJS = $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(KERNEL_SRCS))
+KERNEL_C_OBJS = $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(KERNEL_C_SRCS))
+KERNEL_S_OBJS = $(patsubst $(KERNEL_DIR)/%.S,$(BUILD_DIR)/%.o,$(KERNEL_S_SRCS))
+KERNEL_OBJS = $(KERNEL_C_OBJS) $(KERNEL_S_OBJS)
 
 # Output files
 KERNEL_ELF = $(BUILD_DIR)/vibeos.elf
 KERNEL_BIN = $(BUILD_DIR)/vibeos.bin
 
 # Compiler flags
-CFLAGS = -ffreestanding -nostdlib -nostartfiles -mcpu=cortex-a72 -Wall -Wextra -O2 -I$(KERNEL_DIR)
+CFLAGS = -ffreestanding -nostdlib -nostartfiles -mcpu=cortex-a72 -mgeneral-regs-only -Wall -Wextra -O2 -I$(KERNEL_DIR)
 ASFLAGS = -mcpu=cortex-a72
 LDFLAGS = -nostdlib -T linker.ld
 
@@ -53,6 +56,9 @@ $(BOOT_OBJ): $(BOOT_SRC) | $(BUILD_DIR)
 
 $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.S | $(BUILD_DIR)
+	$(CC) $(ASFLAGS) -c $< -o $@
 
 $(KERNEL_ELF): $(BOOT_OBJ) $(KERNEL_OBJS)
 	$(LD) $(LDFLAGS) $^ -o $@

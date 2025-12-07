@@ -18,4 +18,10 @@ int keyboard_getc(void);
 // Check if key is available
 int keyboard_has_key(void);
 
+// IRQ handler (called from irq.c)
+void keyboard_irq_handler(void);
+
+// Get the keyboard's IRQ number
+uint32_t keyboard_get_irq(void);
+
 #endif

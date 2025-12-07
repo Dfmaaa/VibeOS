@@ -93,6 +93,10 @@ static virtq_avail_t *avail = NULL;
 static virtq_used_t *used = NULL;
 static virtio_input_event_t *events = NULL;
 static uint16_t last_used_idx = 0;
+static int kbd_device_index = -1;  // Which virtio device slot (for IRQ calculation)
+
+// Virtio MMIO IRQs start at 48 (SPI 16) on QEMU virt
+#define VIRTIO_IRQ_BASE 48
 
 #define QUEUE_SIZE 16
 #define DESC_F_WRITE 2
@@ -112,7 +116,7 @@ static int key_buf_write = 0;
 static uint8_t queue_mem[4096] __attribute__((aligned(4096)));
 static virtio_input_event_t event_bufs[QUEUE_SIZE] __attribute__((aligned(16)));
 
-// Scancode to ASCII (simple US layout, lowercase only for now)
+// Scancode to ASCII (simple US layout, lowercase)
 static const char scancode_to_ascii[128] = {
     0, 0, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b', '\t',
     'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n', 0, 'a', 's',
@@ -123,6 +127,25 @@ static const char scancode_to_ascii[128] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
+
+// Scancode to ASCII with shift (US layout)
+static const char scancode_to_ascii_shift[128] = {
+    0, 0, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '\b', '\t',
+    'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n', 0, 'A', 'S',
+    'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~', 0, '|', 'Z', 'X', 'C', 'V',
+    'B', 'N', 'M', '<', '>', '?', 0, '*', 0, ' ', 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, '7', '8', '9', '-', '4', '5', '6', '+', '1',
+    '2', '3', '0', '.', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+// Shift key scancodes (left shift = 42, right shift = 54)
+#define KEY_LEFTSHIFT  42
+#define KEY_RIGHTSHIFT 54
+
+// Shift state
+static int shift_held = 0;
 
 // Memory barriers for device communication
 static inline void mb(void) {
@@ -208,7 +231,8 @@ static volatile uint32_t *find_virtio_input(void) {
 
             // Accept any virtio-input for now, but prefer keyboard
             if (name[0] == 'Q' || name[0] == 'k' || name[0] == 'K') {
-                printf("[KBD] Selected: %s\n", name);
+                printf("[KBD] Selected: %s (device %d)\n", name, i);
+                kbd_device_index = i;
                 return base;
             }
         }
@@ -220,6 +244,7 @@ static volatile uint32_t *find_virtio_input(void) {
         uint32_t magic = read32(base + VIRTIO_MMIO_MAGIC/4);
         uint32_t device_id = read32(base + VIRTIO_MMIO_DEVICE_ID/4);
         if (magic == 0x74726976 && device_id == VIRTIO_DEV_INPUT) {
+            kbd_device_index = i;
             return base;
         }
     }
@@ -257,7 +282,11 @@ int keyboard_init(void) {
     // Driver loaded
     write32(kbd_base + VIRTIO_MMIO_STATUS/4, VIRTIO_STATUS_ACK | VIRTIO_STATUS_DRIVER);
 
-    // Read and write features (we don't need any special features)
+    // Read device features
+    uint32_t dev_features = read32(kbd_base + VIRTIO_MMIO_DEVICE_FEATURES/4);
+    printf("[KBD] Device features: 0x%x\n", dev_features);
+
+    // Accept no special features for now
     write32(kbd_base + VIRTIO_MMIO_DRIVER_FEATURES/4, 0);
 
     // Features OK (modern virtio v2)
@@ -364,19 +393,33 @@ int keyboard_init(void) {
 
 static void process_events(void) {
     if (!kbd_base) return;
+    if (!used) return;  // Safety check
 
     // Check for new events
-    while (last_used_idx != used->idx) {
+    mb();  // Ensure we see device updates
+    uint16_t current_used = used->idx;
+    while (last_used_idx != current_used) {
         uint16_t idx = last_used_idx % QUEUE_SIZE;
         uint32_t desc_idx = used->ring[idx].id;
 
         virtio_input_event_t *ev = &events[desc_idx];
 
         // Process key event
-        if (ev->type == EV_KEY && ev->value == KEY_PRESSED) {
+        if (ev->type == EV_KEY) {
             uint16_t code = ev->code;
-            if (code < 128) {
-                char c = scancode_to_ascii[code];
+
+            // Track shift key state
+            if (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT) {
+                shift_held = (ev->value != KEY_RELEASED);
+            }
+            // Regular key press
+            else if (ev->value == KEY_PRESSED && code < 128) {
+                char c;
+                if (shift_held) {
+                    c = scancode_to_ascii_shift[code];
+                } else {
+                    c = scancode_to_ascii[code];
+                }
                 if (c != 0) {
                     // Add to buffer
                     int next = (key_buf_write + 1) % KEY_BUF_SIZE;
@@ -399,7 +442,7 @@ static void process_events(void) {
     // Notify device we added buffers
     write32(kbd_base + VIRTIO_MMIO_QUEUE_NOTIFY/4, 0);
 
-    // Ack interrupt
+    // Ack interrupt (in case we use interrupts later)
     write32(kbd_base + VIRTIO_MMIO_INTERRUPT_ACK/4, read32(kbd_base + VIRTIO_MMIO_INTERRUPT_STATUS/4));
 }
 
@@ -418,4 +461,17 @@ int keyboard_getc(void) {
     char c = key_buffer[key_buf_read];
     key_buf_read = (key_buf_read + 1) % KEY_BUF_SIZE;
     return c;
+}
+
+// Get the keyboard's IRQ number
+uint32_t keyboard_get_irq(void) {
+    if (kbd_device_index < 0) {
+        return 0;  // Not initialized
+    }
+    return VIRTIO_IRQ_BASE + kbd_device_index;
+}
+
+// IRQ handler - called from irq.c
+void keyboard_irq_handler(void) {
+    process_events();
 }
