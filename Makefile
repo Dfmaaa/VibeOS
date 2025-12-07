@@ -35,8 +35,8 @@ LDFLAGS = -nostdlib -T linker.ld
 
 # QEMU settings
 QEMU = qemu-system-aarch64
-# Graphical mode with ramfb display
-QEMU_FLAGS = -M virt -cpu cortex-a72 -m 256M -device ramfb -serial stdio -kernel $(KERNEL_BIN)
+# Graphical mode with virtio-keyboard
+QEMU_FLAGS = -M virt -cpu cortex-a72 -m 256M -device ramfb -device virtio-keyboard-device -serial stdio -kernel $(KERNEL_BIN)
 # No-graphics mode (terminal only)
 QEMU_FLAGS_NOGRAPHIC = -M virt -cpu cortex-a72 -m 256M -nographic -kernel $(KERNEL_BIN)
 

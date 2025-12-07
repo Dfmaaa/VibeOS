@@ -9,6 +9,8 @@
 #include "string.h"
 #include "printf.h"
 #include "fb.h"
+#include "console.h"
+#include "keyboard.h"
 
 // QEMU virt machine PL011 UART base address
 #define UART0_BASE 0x09000000
@@ -17,6 +19,7 @@
 #define UART_DR     (*(volatile uint32_t *)(UART0_BASE + 0x00))  // Data Register
 #define UART_FR     (*(volatile uint32_t *)(UART0_BASE + 0x18))  // Flag Register
 #define UART_FR_TXFF (1 << 5)  // Transmit FIFO Full
+#define UART_FR_RXFE (1 << 4)  // Receive FIFO Empty
 
 void uart_putc(char c) {
     // Wait until transmit FIFO is not full
@@ -24,6 +27,22 @@ void uart_putc(char c) {
         asm volatile("nop");
     }
     UART_DR = c;
+}
+
+int uart_getc(void) {
+    // Return -1 if no data available
+    if (UART_FR & UART_FR_RXFE) {
+        return -1;
+    }
+    return UART_DR & 0xFF;
+}
+
+int uart_getc_blocking(void) {
+    // Wait for data
+    while (UART_FR & UART_FR_RXFE) {
+        asm volatile("nop");
+    }
+    return UART_DR & 0xFF;
 }
 
 void kernel_main(void) {
@@ -75,28 +94,54 @@ void kernel_main(void) {
 
     // Initialize framebuffer
     if (fb_init() == 0) {
-        // Clear to black
-        fb_clear(COLOR_BLACK);
+        // Initialize console
+        console_init();
+        printf("[FB] Console initialized: %dx%d chars\n", console_cols(), console_rows());
 
-        // Draw "VibeOS" title
-        fb_draw_string(20, 20, "VibeOS v0.1", COLOR_WHITE, COLOR_BLACK);
-        fb_draw_string(20, 40, "================================", COLOR_WHITE, COLOR_BLACK);
-        fb_draw_string(20, 60, "The vibes are immaculate.", COLOR_GREEN, COLOR_BLACK);
-        fb_draw_string(20, 100, "Framebuffer: 800x600", COLOR_WHITE, COLOR_BLACK);
-        fb_draw_string(20, 120, "Font: 8x16 bitmap", COLOR_WHITE, COLOR_BLACK);
-        fb_draw_string(20, 160, "Ready for more awesome stuff!", COLOR_AMBER, COLOR_BLACK);
+        // Print to console (on screen!)
+        console_set_color(COLOR_GREEN, COLOR_BLACK);
+        console_puts("  _   _ _ _          ___  ____  \n");
+        console_puts(" | | | (_) |__   ___/ _ \\/ ___| \n");
+        console_puts(" | | | | | '_ \\ / _ \\ | | \\___ \\ \n");
+        console_puts(" | \\_/ | | |_) |  __/ |_| |___) |\n");
+        console_puts("  \\___/|_|_.__/ \\___|\\___/|____/ \n");
+        console_set_color(COLOR_WHITE, COLOR_BLACK);
+        console_puts("                            by ");
+        console_set_color(COLOR_AMBER, COLOR_BLACK);
+        console_puts("Claude\n");
+        console_puts("\n");
+        console_set_color(COLOR_WHITE, COLOR_BLACK);
+        console_puts("==========================================\n\n");
 
-        printf("[FB] Text drawn on screen!\n");
+        console_set_color(COLOR_GREEN, COLOR_BLACK);
+        console_puts("The vibes are immaculate.\n\n");
+
+        console_set_color(COLOR_WHITE, COLOR_BLACK);
+        console_puts("System ready.\n");
+        console_puts("\n");
     }
 
-    printf("\n");
-    printf("Welcome to VibeOS! The vibes are immaculate.\n");
-    printf("\n");
+    // TODO: virtio-keyboard needs more work, use UART for now
+    // keyboard_init();
 
-    // For now, just halt
-    printf("[KERNEL] Entering idle loop...\n");
+    printf("\n");
+    printf("[KERNEL] Ready. Type in terminal window.\n");
+
+    // Input loop - use UART (type in terminal, shows on screen)
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_puts("> ");
 
     while (1) {
-        asm volatile("wfe");
+        int c = uart_getc();
+        if (c >= 0) {
+            if (c == '\r' || c == '\n') {
+                console_putc('\n');
+                console_puts("> ");
+            } else if (c == 127 || c == '\b') {
+                console_putc('\b');
+            } else {
+                console_putc((char)c);
+            }
+        }
     }
 }
