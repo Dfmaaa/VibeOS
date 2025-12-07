@@ -12,7 +12,7 @@ VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targe
 - **Human**: Vibes only. Yells "fuck yeah" when things work. Cannot provide technical guidance.
 - **Claude**: Full technical lead. Makes all architecture decisions. Wozniak energy.
 
-## Current State (Last Updated: Session 4)
+## Current State (Last Updated: Session 6)
 - [x] Bootloader (boot/boot.S) - Sets up stack, clears BSS, jumps to kernel
 - [x] Minimal kernel (kernel/kernel.c) - UART output working
 - [x] Linker script (linker.ld) - Memory layout for QEMU virt
@@ -26,11 +26,15 @@ VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targe
 - [x] Console (kernel/console.c) - Text console with colors on screen
 - [x] Virtio keyboard (kernel/keyboard.c) - Full keyboard with shift support
 - [x] Shell (kernel/shell.c) - In-kernel shell with commands
-- [x] VFS (kernel/vfs.c) - In-memory filesystem with directories and files
+- [x] VFS (kernel/vfs.c) - Now backed by FAT32, falls back to in-memory
 - [x] Coreutils - ls, cd, pwd, mkdir, touch, cat, echo (with > redirect)
 - [x] ELF loader (kernel/elf.c) - Can load/run ELF binaries
 - [x] Process exec (kernel/process.c) - Win3.1 style, programs call kernel directly via kapi
 - [x] Kernel API (kernel/kapi.c) - Function pointers for programs to call kernel
+- [x] Text editor (kernel/vi.c) - Modal vi clone with normal/insert/command modes
+- [x] Virtio block device (kernel/virtio_blk.c) - Read/write disk sectors
+- [x] FAT32 filesystem (kernel/fat32.c) - Read-only, supports long filenames
+- [x] Persistent storage - 64MB FAT32 disk image, mountable on macOS
 - [ ] Interrupts - GIC/timer code exists but disabled (breaks virtio - unknown bug)
 
 ## Architecture Decisions Made
@@ -58,9 +62,9 @@ Phase 2: Programs - MONOLITH APPROACH
    - Tried external programs, hit linker issues with 6+ embedded binaries
    - Win3.1 vibes - everything in one binary is fine
 
-Phase 3: Apps (NEXT)
-10. Text editor - minimal vi/nano style
-11. Snake - terminal-based game
+Phase 3: Apps (IN PROGRESS)
+10. ~~Text editor~~ - vi clone with modal editing (normal/insert/command modes)
+11. Snake - terminal-based game (NEXT)
 12. More features as needed
 
 Phase 4: GUI (Future)
@@ -89,14 +93,18 @@ Phase 4: GUI (Future)
 - kernel/console.c/.h - Text console (with UART fallback)
 - kernel/font.c/.h - Bitmap font
 - kernel/keyboard.c/.h - Virtio keyboard driver
+- kernel/virtio_blk.c/.h - Virtio block device driver
+- kernel/fat32.c/.h - FAT32 filesystem driver (read-only)
 - kernel/shell.c/.h - In-kernel shell with all commands
-- kernel/vfs.c/.h - In-memory filesystem
+- kernel/vfs.c/.h - Virtual filesystem (backed by FAT32 or in-memory)
+- kernel/vi.c/.h - Modal text editor (vi clone)
 - kernel/elf.c/.h - ELF64 loader
 - kernel/process.c/.h - Process execution
 - kernel/kapi.c/.h - Kernel API for programs
 - kernel/initramfs.c/.h - Binary embedding (currently unused)
 - linker.ld - Memory layout
 - Makefile - Build system
+- disk.img - FAT32 disk image (created by `make disk`)
 
 ### User Directory (currently unused)
 - user/lib/vibe.h - Userspace library header
@@ -106,9 +114,18 @@ Phase 4: GUI (Future)
 
 ### Build & Run
 ```bash
-make        # Build
+make        # Build kernel
+make disk   # Create FAT32 disk image (only needed once)
 make run    # Run with GUI window (serial still in terminal)
 make run-nographic  # Terminal only
+make distclean  # Clean everything including disk image
+```
+
+### Mounting the Disk Image (macOS)
+```bash
+hdiutil attach disk.img        # Mount
+# ... add/edit files in /Volumes/VIBEOS/ ...
+hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
 ```
 
 ### Shell Commands
@@ -125,6 +142,7 @@ make run-nographic  # Terminal only
 | mkdir <dir> | Create directory |
 | touch <file> | Create empty file |
 | cat <file> | Show file contents |
+| vi <file> | Edit file (modal editor) |
 
 ### VFS Structure
 ```
@@ -143,9 +161,10 @@ make run-nographic  # Terminal only
 | Kernel | Monolithic | Everything in kernel space, Win3.1-style |
 | Programs | Built-in | All commands in shell, no external binaries |
 | Memory | Flat (no MMU) | No virtual memory, shared address space |
-| Filesystem | In-memory VFS | Hierarchical, case-insensitive |
+| Filesystem | FAT32 on virtio-blk | Persistent, mountable on host, read-only for now |
 | Shell | POSIX-ish | Familiar syntax, basic redirects |
 | RAM | 256MB | Configurable |
+| Disk | 64MB FAT32 | Persistent storage via virtio-blk |
 | Interrupts | Disabled | Polling works, interrupts break virtio (bug) |
 
 ## Gotchas / Lessons Learned
@@ -161,6 +180,9 @@ make run-nographic  # Terminal only
 - **Embedded binaries**: objcopy binary embedding breaks with 6+ programs. Linker issue. Just use monolith kernel instead.
 - **Console without framebuffer**: console_puts/putc fall back to UART if fb_base is NULL.
 - **kapi colors**: Must use uint32_t for colors (RGB values like 0x00FF00), not uint8_t.
+- **Packed structs on ARM**: Accessing fields in `__attribute__((packed))` structs causes unaligned access faults. Read bytes individually and assemble values manually.
+- **FAT32 minimum size**: FAT32 requires at least ~33MB. Use 64MB disk image.
+- **Virtio-blk polling**: Save `used->idx` before submitting request, then poll until it changes. Don't use a global `last_used_idx` that persists across requests.
 
 ## Session Log
 ### Session 1
@@ -200,3 +222,17 @@ make run-nographic  # Terminal only
 - Still couldn't fix the 6-binary limit
 - **DECISION**: Monolith kernel. All commands stay in shell. Fuck it, it's VibeOS.
 - Final kernel: 28KB, all features working
+
+### Session 6
+- Revisited the external binaries problem - decided to use persistent FAT32 filesystem instead
+- Built virtio-blk driver for block device access
+- Implemented FAT32 filesystem driver (read-only)
+- Integrated FAT32 with VFS - now `/` is backed by the disk image
+- Updated Makefile to create and format 64MB FAT32 disk image
+- Fixed multiple bugs:
+  - Virtio-blk polling logic (was using stale `last_used_idx`)
+  - Packed struct access on ARM (unaligned access faults) - read bytes manually
+  - FAT32 minimum size requirement (increased from 32MB to 64MB)
+- Disk image is mountable on macOS with `hdiutil attach disk.img`
+- Can now put binaries on disk and load them at runtime (solves the 6-binary limit!)
+- **Achievement**: Persistent filesystem working! Files survive reboots!

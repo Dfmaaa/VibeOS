@@ -16,6 +16,7 @@
 #include "process.h"
 #include "initramfs.h"
 #include "kapi.h"
+#include "virtio_blk.h"
 
 // QEMU virt machine PL011 UART base address
 #define UART0_BASE 0x09000000
@@ -129,7 +130,10 @@ void kernel_main(void) {
     // Initialize keyboard (polling mode)
     keyboard_init();
 
-    // Initialize filesystem
+    // Initialize block device (for persistent storage)
+    virtio_blk_init();
+
+    // Initialize filesystem (will use FAT32 if disk available)
     vfs_init();
 
     // Initialize kernel API (for userspace programs)

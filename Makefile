@@ -39,6 +39,8 @@ USER_OBJS = $(patsubst %,$(USER_BUILD_DIR)/%.o,$(USER_PROGS))
 # Output files
 KERNEL_ELF = $(BUILD_DIR)/vibeos.elf
 KERNEL_BIN = $(BUILD_DIR)/vibeos.bin
+DISK_IMG = disk.img
+DISK_SIZE = 64
 
 # Compiler flags
 CFLAGS = -ffreestanding -nostdlib -nostartfiles -mcpu=cortex-a72 -mgeneral-regs-only -Wall -Wextra -O2 -I$(KERNEL_DIR)
@@ -51,13 +53,13 @@ USER_LDFLAGS = -nostdlib -T user/linker.ld
 
 # QEMU settings
 QEMU = qemu-system-aarch64
-# Graphical mode with virtio-keyboard
+# Graphical mode with virtio-keyboard and virtio-blk disk
 # Use force-legacy=false to get modern virtio (version 2) which is easier to program
-QEMU_FLAGS = -M virt -cpu cortex-a72 -m 256M -global virtio-mmio.force-legacy=false -device ramfb -device virtio-keyboard-device -serial stdio -kernel $(KERNEL_BIN)
-# No-graphics mode (terminal only)
-QEMU_FLAGS_NOGRAPHIC = -M virt -cpu cortex-a72 -m 256M -nographic -kernel $(KERNEL_BIN)
+QEMU_FLAGS = -M virt -cpu cortex-a72 -m 256M -global virtio-mmio.force-legacy=false -device ramfb -device virtio-blk-device,drive=hd0 -drive file=$(DISK_IMG),if=none,format=raw,id=hd0 -device virtio-keyboard-device -serial stdio -kernel $(KERNEL_BIN)
+# No-graphics mode (terminal only) - no keyboard in nographic mode
+QEMU_FLAGS_NOGRAPHIC = -M virt -cpu cortex-a72 -m 256M -global virtio-mmio.force-legacy=false -device virtio-blk-device,drive=hd0 -drive file=$(DISK_IMG),if=none,format=raw,id=hd0 -nographic -kernel $(KERNEL_BIN)
 
-.PHONY: all clean run run-nographic debug user
+.PHONY: all clean run run-nographic debug user disk
 
 all: $(KERNEL_BIN)
 
@@ -113,10 +115,39 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 	@echo "  Run with: make run"
 	@echo "========================================="
 
-run: $(KERNEL_BIN)
+# Create disk image with FAT32 filesystem
+# Only creates if it doesn't exist - to recreate, delete disk.img first
+disk: $(DISK_IMG)
+
+$(DISK_IMG):
+	@echo "Creating FAT32 disk image..."
+	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=$(DISK_SIZE)
+	@echo "Formatting as FAT32..."
+	@DISK_DEV=$$(hdiutil attach -nomount $(DISK_IMG) | head -1 | awk '{print $$1}') && \
+		newfs_msdos -F 32 -v VIBEOS $$DISK_DEV && \
+		hdiutil detach $$DISK_DEV
+	@echo "Creating directory structure..."
+	@hdiutil attach $(DISK_IMG) > /dev/null
+	@mkdir -p /Volumes/VIBEOS/home/user
+	@mkdir -p /Volumes/VIBEOS/bin
+	@mkdir -p /Volumes/VIBEOS/etc
+	@mkdir -p /Volumes/VIBEOS/tmp
+	@echo "Welcome to VibeOS!" > /Volumes/VIBEOS/etc/motd
+	@hdiutil detach /Volumes/VIBEOS > /dev/null
+	@echo ""
+	@echo "========================================="
+	@echo "  Disk image created: $(DISK_IMG)"
+	@echo ""
+	@echo "  To mount and add files on macOS:"
+	@echo "    hdiutil attach $(DISK_IMG)"
+	@echo "    # ... add files ..."
+	@echo "    hdiutil detach /Volumes/VIBEOS"
+	@echo "========================================="
+
+run: $(KERNEL_BIN) $(DISK_IMG)
 	$(QEMU) $(QEMU_FLAGS)
 
-run-nographic: $(KERNEL_BIN)
+run-nographic: $(KERNEL_BIN) $(DISK_IMG)
 	$(QEMU) $(QEMU_FLAGS_NOGRAPHIC)
 
 debug: $(KERNEL_BIN)
@@ -130,6 +161,10 @@ disasm-user: $(USER_ELFS)
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+# Clean everything including disk image
+distclean: clean
+	rm -f $(DISK_IMG)
 
 # Alternative cross-compiler detection
 # Try different common toolchain names
