@@ -14,7 +14,7 @@ VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targe
 - **Human**: Vibes only. Yells "fuck yeah" when things work. Cannot provide technical guidance.
 - **Claude**: Full technical lead. Makes all architecture decisions. Wozniak energy.
 
-## Current State (Last Updated: Session 24)
+## Current State (Last Updated: Session 25)
 - [x] Bootloader (boot/boot.S) - Sets up stack, clears BSS, jumps to kernel
 - [x] Minimal kernel (kernel/kernel.c) - UART output working
 - [x] Linker script (linker.ld) - Memory layout for QEMU virt
@@ -129,6 +129,8 @@ Phase 4: GUI (IN PROGRESS)
 
 ### User Directory (userspace programs)
 - user/lib/vibe.h - Userspace library header
+- user/lib/gfx.h - Shared graphics primitives (header-only)
+- user/lib/icons.h - Dock icons and VibeOS logo bitmaps
 - user/lib/crt0.S - C runtime startup
 - user/bin/*.c - Program sources
 - user/linker.ld - Program linker script (PIE, base at 0x0)
@@ -680,6 +682,24 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
   - Files app delete action uses same userspace implementation
   - Works correctly with -O3 optimization
 - **Achievement**: Full -O3 optimization across kernel and userspace!
+
+### Session 25
+- **Desktop modularization - code cleanup!**
+  - Extracted icon bitmaps to `user/lib/icons.h` (~500 lines of bitmap data)
+  - Created VibeOS logo (stylized "V") to replace Apple logo
+  - Created shared graphics library `user/lib/gfx.h` (header-only, ~130 lines)
+  - Updated all GUI apps to use gfx.h instead of duplicated drawing code:
+    - desktop.c, calc.c, sysmon.c, files.c, textedit.c
+  - Removed ~250 lines of duplicated buf_*/bb_* drawing functions across apps
+  - desktop.c reduced from ~1500 to ~1200 lines
+- **New files:**
+  - `user/lib/icons.h` - All 32x32 dock icons + 16x16 VibeOS logo
+  - `user/lib/gfx.h` - gfx_ctx_t context, put_pixel, fill_rect, draw_char, draw_string, draw_rect, patterns
+- **Architecture note:**
+  - gfx.h is header-only with static inline functions - no Makefile changes needed
+  - Apps use macros to alias old function names (buf_*, bb_*) to new gfx_* calls
+  - Zero runtime overhead, compiler inlines everything
+- **Achievement**: Cleaner codebase! Shared graphics primitives!
 
 **NEXT SESSION TODO:**
 - Port minimp3 decoder (now possible with floats!)

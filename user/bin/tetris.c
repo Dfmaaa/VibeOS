@@ -104,7 +104,7 @@ static uint32_t rand(void) {
 }
 
 // Game speed delay in milliseconds
-#define TETRIS_TICK_MS 50
+#define TETRIS_TICK_MS 16  // ~60fps
 
 // Draw the border
 static void draw_border(void) {
@@ -490,7 +490,7 @@ int main(kapi_t *kapi, int argc, char **argv) {
     init_game();
 
     int drop_counter = 0;
-    int drop_speed = 40;  // Start slower (was 20)
+    int drop_speed = 30;  // Ticks between drops (at 60fps, 30 ticks = 500ms)
 
     while (1) {
         if (process_input() < 0) {
@@ -502,9 +502,10 @@ int main(kapi_t *kapi, int argc, char **argv) {
             drop_counter = 0;
             update_game();
 
-            // Gentler speed curve: starts at 40, decreases by 3 per level
-            drop_speed = 43 - level * 3;
-            if (drop_speed < 5) drop_speed = 5;
+            // Speed curve: starts at 30, decreases by 2 per level
+            // Level 1: 30 ticks (500ms), Level 10: 12 ticks (200ms)
+            drop_speed = 32 - level * 2;
+            if (drop_speed < 6) drop_speed = 6;
         }
 
         if (game_over) {

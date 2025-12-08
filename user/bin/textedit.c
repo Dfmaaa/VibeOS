@@ -6,11 +6,13 @@
  */
 
 #include "../lib/vibe.h"
+#include "../lib/gfx.h"
 
 static kapi_t *api;
 static int window_id = -1;
 static uint32_t *win_buffer;
 static int win_w, win_h;
+static gfx_ctx_t gfx;
 
 // Editor dimensions
 #define WINDOW_W 500
@@ -88,39 +90,11 @@ static void detect_syntax(const char *filename) {
     }
 }
 
-// ============ Drawing Helpers ============
+// ============ Drawing Helpers (macros wrapping gfx lib) ============
 
-static void buf_fill_rect(int x, int y, int w, int h, uint32_t color) {
-    for (int py = y; py < y + h && py < win_h; py++) {
-        if (py < 0) continue;
-        for (int px = x; px < x + w && px < win_w; px++) {
-            if (px < 0) continue;
-            win_buffer[py * win_w + px] = color;
-        }
-    }
-}
-
-static void buf_draw_char(int x, int y, char c, uint32_t fg, uint32_t bg) {
-    const uint8_t *glyph = &api->font_data[(unsigned char)c * 16];
-    for (int row = 0; row < 16; row++) {
-        for (int col = 0; col < 8; col++) {
-            uint32_t color = (glyph[row] & (0x80 >> col)) ? fg : bg;
-            int px = x + col;
-            int py = y + row;
-            if (px >= 0 && px < win_w && py >= 0 && py < win_h) {
-                win_buffer[py * win_w + px] = color;
-            }
-        }
-    }
-}
-
-static void buf_draw_string(int x, int y, const char *s, uint32_t fg, uint32_t bg) {
-    while (*s) {
-        buf_draw_char(x, y, *s, fg, bg);
-        x += 8;
-        s++;
-    }
-}
+#define buf_fill_rect(x, y, w, h, c)     gfx_fill_rect(&gfx, x, y, w, h, c)
+#define buf_draw_char(x, y, ch, fg, bg)  gfx_draw_char(&gfx, x, y, ch, fg, bg)
+#define buf_draw_string(x, y, s, fg, bg) gfx_draw_string(&gfx, x, y, s, fg, bg)
 
 // ============ Text Buffer Helpers ============
 
@@ -818,6 +792,9 @@ int main(kapi_t *kapi, int argc, char **argv) {
         api->window_destroy(window_id);
         return 1;
     }
+
+    // Initialize graphics context
+    gfx_init(&gfx, win_buffer, win_w, win_h, api->font_data);
 
     // Calculate visible area
     visible_cols = (win_w - CONTENT_X * 2) / CHAR_W;

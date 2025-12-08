@@ -6,64 +6,24 @@
  */
 
 #include "../lib/vibe.h"
+#include "../lib/gfx.h"
 
 static kapi_t *api;
 static int window_id = -1;
 static uint32_t *win_buffer;
 static int win_w, win_h;
+static gfx_ctx_t gfx;
 
 // Window content dimensions
 #define CONTENT_W 200
 #define CONTENT_H 120
 
-// ============ Drawing Helpers ============
+// ============ Drawing Helpers (macros wrapping gfx lib) ============
 
-static void buf_fill_rect(int x, int y, int w, int h, uint32_t color) {
-    for (int py = y; py < y + h && py < win_h; py++) {
-        if (py < 0) continue;
-        for (int px = x; px < x + w && px < win_w; px++) {
-            if (px < 0) continue;
-            win_buffer[py * win_w + px] = color;
-        }
-    }
-}
-
-static void buf_draw_char(int x, int y, char c, uint32_t fg, uint32_t bg) {
-    const uint8_t *glyph = &api->font_data[(unsigned char)c * 16];
-    for (int row = 0; row < 16; row++) {
-        for (int col = 0; col < 8; col++) {
-            uint32_t color = (glyph[row] & (0x80 >> col)) ? fg : bg;
-            int px = x + col;
-            int py = y + row;
-            if (px >= 0 && px < win_w && py >= 0 && py < win_h) {
-                win_buffer[py * win_w + px] = color;
-            }
-        }
-    }
-}
-
-static void buf_draw_string(int x, int y, const char *s, uint32_t fg, uint32_t bg) {
-    while (*s) {
-        buf_draw_char(x, y, *s, fg, bg);
-        x += 8;
-        s++;
-    }
-}
-
-static void buf_draw_rect(int x, int y, int w, int h, uint32_t color) {
-    for (int i = 0; i < w; i++) {
-        if (x + i >= 0 && x + i < win_w) {
-            if (y >= 0 && y < win_h) win_buffer[y * win_w + x + i] = color;
-            if (y + h - 1 >= 0 && y + h - 1 < win_h) win_buffer[(y + h - 1) * win_w + x + i] = color;
-        }
-    }
-    for (int i = 0; i < h; i++) {
-        if (y + i >= 0 && y + i < win_h) {
-            if (x >= 0 && x < win_w) win_buffer[(y + i) * win_w + x] = color;
-            if (x + w - 1 >= 0 && x + w - 1 < win_w) win_buffer[(y + i) * win_w + x + w - 1] = color;
-        }
-    }
-}
+#define buf_fill_rect(x, y, w, h, c)     gfx_fill_rect(&gfx, x, y, w, h, c)
+#define buf_draw_char(x, y, ch, fg, bg)  gfx_draw_char(&gfx, x, y, ch, fg, bg)
+#define buf_draw_string(x, y, s, fg, bg) gfx_draw_string(&gfx, x, y, s, fg, bg)
+#define buf_draw_rect(x, y, w, h, c)     gfx_draw_rect(&gfx, x, y, w, h, c)
 
 // ============ Formatting Helpers ============
 
@@ -219,6 +179,9 @@ int main(kapi_t *kapi, int argc, char **argv) {
         api->window_destroy(window_id);
         return 1;
     }
+
+    // Initialize graphics context
+    gfx_init(&gfx, win_buffer, win_w, win_h, api->font_data);
 
     // Initial draw
     draw_all();
