@@ -61,8 +61,14 @@ int vfs_read(vfs_node_t *file, char *buf, size_t size, size_t offset);
 int vfs_write(vfs_node_t *file, const char *buf, size_t size);
 int vfs_append(vfs_node_t *file, const char *buf, size_t size);
 
-// Delete
+// Delete file
 int vfs_delete(const char *path);
+
+// Delete empty directory
+int vfs_delete_dir(const char *path);
+
+// Delete file or directory recursively
+int vfs_delete_recursive(const char *path);
 
 // Rename (same directory only)
 int vfs_rename(const char *path, const char *newname);

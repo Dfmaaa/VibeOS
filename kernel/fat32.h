@@ -109,6 +109,14 @@ int fat32_write_file(const char *path, const void *buf, size_t size);
 // Returns 0 on success, -1 on error
 int fat32_delete(const char *path);
 
+// Delete an empty directory
+// Returns 0 on success, -1 on error (including if not empty)
+int fat32_delete_dir(const char *path);
+
+// Delete a file or directory recursively
+// Returns 0 on success, -1 on error
+int fat32_delete_recursive(const char *path);
+
 // Rename a file or directory (same directory only)
 // oldpath: full path to existing file/dir
 // newname: new filename (just the name, not full path)

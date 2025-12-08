@@ -24,7 +24,7 @@ KERNEL_C_SRCS = $(wildcard $(KERNEL_DIR)/*.c)
 KERNEL_S_SRCS = $(wildcard $(KERNEL_DIR)/*.S)
 
 # Userspace programs to build and install to disk
-USER_PROGS = snake tetris desktop calc vibesh echo ls cat pwd mkdir touch rm term uptime sysmon textedit
+USER_PROGS = snake tetris desktop calc vibesh echo ls cat pwd mkdir touch rm term uptime sysmon textedit files
 
 # Object files
 BOOT_OBJ = $(BUILD_DIR)/boot.o

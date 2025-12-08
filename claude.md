@@ -507,6 +507,36 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
   - Colors only appear in apps where it makes sense (desktop stays 1-bit B&W)
 - **Achievement**: Real text editor with IDE-lite features!
 
+### Session 19
+- **Built File Explorer (`/bin/files`):**
+  - Windowed GUI file browser
+  - Navigate directories (click to select, double-click to enter)
+  - Path bar showing current location
+  - ".." to go up a directory
+  - Right-click context menu with:
+    - New File / New Folder (with inline rename UI)
+    - Rename (inline text editing)
+    - Delete (recursive - works on non-empty directories!)
+    - Open with TextEdit
+    - Open Terminal Here
+  - Keyboard navigation (arrow keys, Enter, Backspace)
+- **Added right-click support to desktop:**
+  - Desktop now detects right mouse button clicks
+  - Passes button info to windowed apps via event data3
+- **Implemented recursive directory deletion:**
+  - `fat32_delete_recursive()` - deletes files and directories recursively
+  - Walks directory tree, deletes children first, then parent
+  - Exposed via `vfs_delete_recursive()` and kapi
+- **Improved create file/folder UX:**
+  - "New File" / "New Folder" now shows inline rename field immediately
+  - Type the name and press Enter to actually create
+  - Press Escape to cancel
+  - No more "untitled" / "newfolder" placeholder names
+- **Known limitation**: FAT32 filenames limited to 8.3 format
+  - Long filename (LFN) writing not yet implemented
+  - Can read LFN, just can't create files with long names
+- **Achievement**: Full-featured file explorer!
+
 **NEXT SESSION TODO:**
-- Build file explorer as windowed app
+- Implement FAT32 LFN (Long Filename) writing
 - Maybe DOOM?

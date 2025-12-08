@@ -840,20 +840,22 @@ static void flip_buffer(void) {
 
 // ============ Input Handling ============
 
-static void handle_mouse_click(int x, int y) {
-    // Check dock first
-    int dock_idx = dock_icon_at_point(x, y);
-    if (dock_idx >= 0) {
-        dock_icon_t *icon = &dock_icons[dock_idx];
-        if (icon->is_fullscreen) {
-            // Fullscreen app - exec and wait
-            api->exec(icon->exec_path);
-            // When we return, redraw everything
-        } else {
-            // Windowed app - spawn
-            api->spawn(icon->exec_path);
+static void handle_mouse_click(int x, int y, uint8_t buttons) {
+    // Check dock first (left click only)
+    if (buttons & MOUSE_BTN_LEFT) {
+        int dock_idx = dock_icon_at_point(x, y);
+        if (dock_idx >= 0) {
+            dock_icon_t *icon = &dock_icons[dock_idx];
+            if (icon->is_fullscreen) {
+                // Fullscreen app - exec and wait
+                api->exec(icon->exec_path);
+                // When we return, redraw everything
+            } else {
+                // Windowed app - spawn
+                api->spawn(icon->exec_path);
+            }
+            return;
         }
-        return;
     }
 
     // Check windows
@@ -862,8 +864,8 @@ static void handle_mouse_click(int x, int y) {
         window_t *w = &windows[wid];
         bring_to_front(wid);
 
-        // Check if click is on title bar
-        if (y >= w->y && y < w->y + TITLE_BAR_HEIGHT) {
+        // Check if click is on title bar (left click only for dragging/close)
+        if ((buttons & MOUSE_BTN_LEFT) && y >= w->y && y < w->y + TITLE_BAR_HEIGHT) {
             // Check close box (updated position)
             int close_x = w->x + 6;
             int close_y = w->y + 4;
@@ -878,11 +880,11 @@ static void handle_mouse_click(int x, int y) {
             dragging_window = wid;
             drag_offset_x = x - w->x;
             drag_offset_y = y - w->y;
-        } else {
-            // Click in content area - send event to app
+        } else if (y >= w->y + TITLE_BAR_HEIGHT) {
+            // Click in content area - send event to app with button info
             int local_x = x - w->x - 1;
             int local_y = y - w->y - TITLE_BAR_HEIGHT - 1;
-            push_event(wid, WIN_EVENT_MOUSE_DOWN, local_x, local_y, 0);
+            push_event(wid, WIN_EVENT_MOUSE_DOWN, local_x, local_y, buttons);
         }
     }
 }
@@ -979,9 +981,13 @@ int main(kapi_t *kapi, int argc, char **argv) {
         // Handle mouse events
         int left_pressed = (mouse_buttons & MOUSE_BTN_LEFT) && !(mouse_prev_buttons & MOUSE_BTN_LEFT);
         int left_released = !(mouse_buttons & MOUSE_BTN_LEFT) && (mouse_prev_buttons & MOUSE_BTN_LEFT);
+        int right_pressed = (mouse_buttons & MOUSE_BTN_RIGHT) && !(mouse_prev_buttons & MOUSE_BTN_RIGHT);
 
-        if (left_pressed) {
-            handle_mouse_click(mouse_x, mouse_y);
+        if (left_pressed || right_pressed) {
+            uint8_t pressed_btns = 0;
+            if (left_pressed) pressed_btns |= MOUSE_BTN_LEFT;
+            if (right_pressed) pressed_btns |= MOUSE_BTN_RIGHT;
+            handle_mouse_click(mouse_x, mouse_y, pressed_btns);
         }
         if (left_released) {
             handle_mouse_release(mouse_x, mouse_y);

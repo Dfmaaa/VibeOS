@@ -1118,3 +1118,214 @@ int fat32_rename(const char *oldpath, const char *newname) {
     // Write back
     return write_cluster(entry_cluster, cluster_buf);
 }
+
+// Check if directory is empty (only has . and ..)
+static int is_dir_empty(uint32_t dir_cluster) {
+    uint32_t cluster = dir_cluster;
+
+    while (cluster >= 2 && cluster < FAT32_EOC) {
+        if (read_cluster(cluster, cluster_buf) < 0) {
+            return -1;
+        }
+
+        int entries_per_cluster = (fs.sectors_per_cluster * fs.bytes_per_sector) / 32;
+
+        for (int i = 0; i < entries_per_cluster; i++) {
+            fat32_dirent_t *entry = (fat32_dirent_t *)(cluster_buf + i * 32);
+
+            // End of directory
+            if (entry->name[0] == 0x00) {
+                return 1;  // Empty
+            }
+
+            // Deleted entry - skip
+            if ((uint8_t)entry->name[0] == 0xE5) {
+                continue;
+            }
+
+            // LFN entry - skip
+            if ((entry->attr & FAT_ATTR_LFN) == FAT_ATTR_LFN) {
+                continue;
+            }
+
+            // Check if it's . or ..
+            if (entry->name[0] == '.' && (entry->name[1] == ' ' || entry->name[1] == '.')) {
+                continue;
+            }
+
+            // Found a real entry - not empty
+            return 0;
+        }
+
+        cluster = fat_next_cluster(cluster);
+    }
+
+    return 1;  // Empty
+}
+
+int fat32_delete_dir(const char *path) {
+    if (!fs_initialized) return -1;
+
+    char dirname[256];
+    uint32_t parent_cluster;
+
+    if (parse_parent_path(path, &parent_cluster, dirname) < 0) {
+        return -1;
+    }
+
+    // Find the entry
+    uint32_t entry_cluster, entry_offset;
+    fat32_dirent_t *entry = find_entry_in_dir(parent_cluster, dirname, &entry_cluster, &entry_offset);
+    if (!entry) return -1;
+
+    // Must be a directory
+    if (!(entry->attr & FAT_ATTR_DIRECTORY)) {
+        return -1;
+    }
+
+    // Get the directory's cluster
+    uint32_t dir_cluster = ((uint32_t)entry->cluster_hi << 16) | entry->cluster_lo;
+
+    // Check if directory is empty
+    if (!is_dir_empty(dir_cluster)) {
+        return -1;  // Directory not empty
+    }
+
+    // Free the cluster chain
+    if (dir_cluster >= 2 && dir_cluster < FAT32_EOC) {
+        fat_free_chain(dir_cluster);
+    }
+
+    // Mark directory entry as deleted
+    if (read_cluster(entry_cluster, cluster_buf) < 0) {
+        return -1;
+    }
+
+    cluster_buf[entry_offset * 32] = 0xE5;  // Deleted marker
+
+    return write_cluster(entry_cluster, cluster_buf);
+}
+
+// Forward declaration for recursion
+int fat32_delete_recursive(const char *path);
+
+// Helper to delete all contents of a directory
+static int delete_dir_contents(const char *dir_path) {
+    // Open directory to iterate
+    uint32_t dir_cluster;
+
+    // Resolve the directory path
+    if (strcmp(dir_path, "/") == 0) {
+        dir_cluster = fs.root_cluster;
+    } else {
+        uint32_t dummy;
+        fat32_dirent_t *entry = resolve_path(dir_path, &dummy);
+        if (!entry || !(entry->attr & FAT_ATTR_DIRECTORY)) {
+            return -1;
+        }
+        dir_cluster = ((uint32_t)entry->cluster_hi << 16) | entry->cluster_lo;
+    }
+
+    uint32_t cluster = dir_cluster;
+    char entry_name[256];
+    char child_path[512];
+
+    while (cluster >= 2 && cluster < FAT32_EOC) {
+        if (read_cluster(cluster, cluster_buf) < 0) {
+            return -1;
+        }
+
+        int entries_per_cluster = (fs.sectors_per_cluster * fs.bytes_per_sector) / 32;
+
+        for (int i = 0; i < entries_per_cluster; i++) {
+            uint8_t *e = cluster_buf + i * 32;
+
+            // End of directory
+            if (e[0] == 0x00) {
+                return 0;  // Done, directory is now empty
+            }
+
+            // Deleted entry - skip
+            if (e[0] == 0xE5) {
+                continue;
+            }
+
+            // LFN entry - skip (will be deleted with 8.3 entry)
+            if ((e[11] & FAT_ATTR_LFN) == FAT_ATTR_LFN) {
+                continue;
+            }
+
+            // Get entry name
+            fat_name_to_str((char *)e, entry_name);
+
+            // Skip . and ..
+            if (strcmp(entry_name, ".") == 0 || strcmp(entry_name, "..") == 0) {
+                continue;
+            }
+
+            // Build full path
+            if (strcmp(dir_path, "/") == 0) {
+                strcpy(child_path, "/");
+                strcat(child_path, entry_name);
+            } else {
+                strcpy(child_path, dir_path);
+                strcat(child_path, "/");
+                strcat(child_path, entry_name);
+            }
+
+            // Delete this entry (recursively if directory)
+            if (fat32_delete_recursive(child_path) < 0) {
+                return -1;
+            }
+
+            // Re-read cluster as it may have been modified
+            if (read_cluster(cluster, cluster_buf) < 0) {
+                return -1;
+            }
+        }
+
+        cluster = fat_next_cluster(cluster);
+    }
+
+    return 0;
+}
+
+int fat32_delete_recursive(const char *path) {
+    if (!fs_initialized) return -1;
+
+    char name[256];
+    uint32_t parent_cluster;
+
+    if (parse_parent_path(path, &parent_cluster, name) < 0) {
+        return -1;
+    }
+
+    // Find the entry
+    uint32_t entry_cluster, entry_offset;
+    fat32_dirent_t *entry = find_entry_in_dir(parent_cluster, name, &entry_cluster, &entry_offset);
+    if (!entry) return -1;
+
+    uint8_t is_dir = entry->attr & FAT_ATTR_DIRECTORY;
+    uint32_t first_cluster = ((uint32_t)entry->cluster_hi << 16) | entry->cluster_lo;
+
+    if (is_dir) {
+        // First delete all contents recursively
+        if (delete_dir_contents(path) < 0) {
+            return -1;
+        }
+    }
+
+    // Free the cluster chain
+    if (first_cluster >= 2 && first_cluster < FAT32_EOC) {
+        fat_free_chain(first_cluster);
+    }
+
+    // Mark directory entry as deleted
+    if (read_cluster(entry_cluster, cluster_buf) < 0) {
+        return -1;
+    }
+
+    cluster_buf[entry_offset * 32] = 0xE5;  // Deleted marker
+
+    return write_cluster(entry_cluster, cluster_buf);
+}

@@ -45,6 +45,8 @@ typedef struct {
     void *(*create)(const char *path);
     void *(*mkdir)(const char *path);
     int   (*delete)(const char *path);
+    int   (*delete_dir)(const char *path);  // Delete empty directory
+    int   (*delete_recursive)(const char *path);  // Delete file or dir recursively
     int   (*rename)(const char *path, const char *newname);
     int   (*readdir)(void *dir, int index, char *name, size_t name_size, uint8_t *type);
     int   (*set_cwd)(const char *path);

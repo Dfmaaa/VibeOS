@@ -109,6 +109,16 @@ static int kapi_delete(const char *path) {
     return vfs_delete(path);
 }
 
+// Wrapper for delete_dir
+static int kapi_delete_dir(const char *path) {
+    return vfs_delete_dir(path);
+}
+
+// Wrapper for delete_recursive
+static int kapi_delete_recursive(const char *path) {
+    return vfs_delete_recursive(path);
+}
+
 // Wrapper for rename
 static int kapi_rename(const char *path, const char *newname) {
     return vfs_rename(path, newname);
@@ -159,6 +169,8 @@ void kapi_init(void) {
     kapi.create = kapi_create;
     kapi.mkdir = kapi_mkdir;
     kapi.delete = kapi_delete;
+    kapi.delete_dir = kapi_delete_dir;
+    kapi.delete_recursive = kapi_delete_recursive;
     kapi.rename = kapi_rename;
     kapi.readdir = kapi_readdir;
     kapi.set_cwd = kapi_set_cwd;
