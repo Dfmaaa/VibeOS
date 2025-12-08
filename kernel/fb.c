@@ -7,6 +7,7 @@
 #include "fb.h"
 #include "printf.h"
 #include "string.h"
+#include "memory.h"
 
 // Framebuffer state
 uint32_t fb_width = 0;
@@ -147,9 +148,6 @@ static int find_ramfb_selector(void) {
     return -1;
 }
 
-// We'll allocate framebuffer at a fixed location after heap
-#define FB_MEMORY_BASE 0x48000000  // 128MB into RAM, well after kernel/heap
-
 int fb_init(void) {
     printf("[FB] Initializing framebuffer...\n");
 
@@ -164,7 +162,15 @@ int fb_init(void) {
     fb_width = 800;
     fb_height = 600;
     fb_pitch = fb_width * 4;  // 4 bytes per pixel (32-bit)
-    fb_base = (uint32_t *)FB_MEMORY_BASE;
+
+    // Allocate framebuffer from heap
+    // Size = 800 * 600 * 4 = 1,920,000 bytes (~1.9 MB)
+    size_t fb_size = fb_width * fb_height * sizeof(uint32_t);
+    fb_base = (uint32_t *)malloc(fb_size);
+    if (!fb_base) {
+        printf("[FB] ERROR: Failed to allocate framebuffer!\n");
+        return -1;
+    }
 
     // Configure ramfb (all values big-endian)
     ramfb_config_t config;

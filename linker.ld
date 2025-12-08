@@ -5,7 +5,11 @@
  * Using -bios mode: flash starts at 0x0, RAM at 0x40000000
  * We boot at EL3 with full hardware access
  *
- * Code runs from flash (0x0), data/BSS in RAM (0x40000000+)
+ * Code runs from flash (0x0), data/BSS in RAM
+ *
+ * IMPORTANT: QEMU places the DTB at 0x40000000 (start of RAM).
+ * We start our RAM usage at 0x40010000 to preserve the DTB.
+ * DTB is typically ~8-16KB, so 64KB buffer is plenty.
  */
 
 ENTRY(_start)
@@ -13,7 +17,8 @@ ENTRY(_start)
 MEMORY
 {
     FLASH (rx)  : ORIGIN = 0x00000000, LENGTH = 64M
-    RAM   (rwx) : ORIGIN = 0x40000000, LENGTH = 256M
+    /* Skip first 2MB of RAM - that's where the DTB lives (can be up to 1MB+) */
+    RAM   (rwx) : ORIGIN = 0x40200000, LENGTH = 256M - 2M
 }
 
 SECTIONS

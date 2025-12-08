@@ -8,16 +8,15 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// Memory layout
-#define RAM_START       0x40000000
-#define RAM_SIZE        0x10000000  // 256MB
-#define RAM_END         (RAM_START + RAM_SIZE)
+// Detected RAM (set by memory_init from DTB)
+extern uint64_t ram_base;
+extern uint64_t ram_size;
 
-// Heap starts after kernel (we'll set this at runtime)
+// Heap bounds (set at runtime)
 extern uint64_t heap_start;
 extern uint64_t heap_end;
 
-// Initialize memory management
+// Initialize memory management (parses DTB to detect RAM)
 void memory_init(void);
 
 // Simple heap allocator

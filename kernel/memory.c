@@ -3,10 +3,19 @@
  *
  * Simple first-fit heap allocator. Not the fastest, but easy to understand.
  * Each allocation has a header with size and free flag.
+ *
+ * RAM is detected at runtime by parsing the Device Tree Blob (DTB).
  */
 
 #include "memory.h"
+#include "dtb.h"
+#include "printf.h"
 
+// Detected RAM info (populated by memory_init)
+uint64_t ram_base;
+uint64_t ram_size;
+
+// Heap bounds
 uint64_t heap_start;
 uint64_t heap_end;
 
@@ -25,15 +34,42 @@ static block_header_t *free_list = NULL;
 // Defined in linker script - end of BSS in RAM
 extern uint64_t _bss_end;
 
-// Programs load at 0x41000000+, so heap must end before that
-#define PROGRAM_LOAD_AREA 0x41000000
+// Stack location (must match boot.S!)
+#define KERNEL_STACK_TOP 0x4F000000
+
+// Leave some room below stack for safety (1MB)
+#define STACK_BUFFER (1 * 1024 * 1024)
 
 void memory_init(void) {
-    // Heap starts after BSS (in RAM), aligned to 16 bytes
-    // Add 64KB buffer for stack safety
+    // Parse DTB to get RAM info
+    struct dtb_memory_info mem_info;
+    if (dtb_parse((void *)DTB_ADDR, &mem_info) != 0) {
+        // Fallback to safe defaults if DTB parsing fails
+        printf("[MEM] WARNING: DTB parse failed, using defaults\n");
+        ram_base = 0x40000000;
+        ram_size = 256 * 1024 * 1024;  // 256MB
+    } else {
+        ram_base = mem_info.base;
+        ram_size = mem_info.size;
+    }
+
+    printf("[MEM] RAM: base=0x%lx, size=%lu MB\n", ram_base, ram_size / (1024 * 1024));
+
+    // Heap starts after BSS, aligned to 16 bytes
+    // Add 64KB buffer after BSS for safety
     heap_start = ALIGN_UP((uint64_t)&_bss_end + 0x10000, 16);
-    // Heap ends BEFORE the program load area to avoid overlap
-    heap_end = PROGRAM_LOAD_AREA;
+
+    // Heap ends before the stack (with buffer)
+    // Stack is at fixed address, so heap must stay below it
+    uint64_t ram_end = ram_base + ram_size;
+    uint64_t heap_max = KERNEL_STACK_TOP - STACK_BUFFER;
+
+    // But also can't exceed actual RAM
+    if (heap_max > ram_end) {
+        heap_max = ram_end - STACK_BUFFER;
+    }
+
+    heap_end = heap_max;
 
     // Initialize with one giant free block
     free_list = (block_header_t *)heap_start;
@@ -41,9 +77,8 @@ void memory_init(void) {
     free_list->is_free = 1;
     free_list->next = NULL;
 
-    // Debug: print heap range
-    extern void printf(const char *fmt, ...);
-    printf("[MEM] Heap: 0x%lx - 0x%lx\n", heap_start, heap_end);
+    printf("[MEM] Heap: 0x%lx - 0x%lx (%lu MB)\n",
+           heap_start, heap_end, (heap_end - heap_start) / (1024 * 1024));
 }
 
 void *malloc(size_t size) {

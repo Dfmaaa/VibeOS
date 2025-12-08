@@ -25,9 +25,9 @@ static int next_pid = 1;
 static cpu_context_t kernel_context;
 
 // Program load address - grows upward as we load programs
-// Start after kernel heap has some room
-#define PROGRAM_BASE 0x41000000  // 16MB into RAM
-static uint64_t next_load_addr = PROGRAM_BASE;
+// Set dynamically based on heap_end
+static uint64_t program_base = 0;
+static uint64_t next_load_addr = 0;
 
 // Align to 64KB boundary for cleaner loading
 #define ALIGN_64K(x) (((x) + 0xFFFF) & ~0xFFFFULL)
@@ -46,8 +46,13 @@ void process_init(void) {
     }
     current_pid = -1;
     next_pid = 1;
-    next_load_addr = PROGRAM_BASE;
+
+    // Programs load right after the heap
+    program_base = ALIGN_64K(heap_end);
+    next_load_addr = program_base;
+
     printf("[PROC] Process subsystem initialized (max %d processes)\n", MAX_PROCESSES);
+    printf("[PROC] Program load area: 0x%lx+\n", program_base);
 }
 
 // Find a free slot in the process table

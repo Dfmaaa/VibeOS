@@ -143,8 +143,8 @@ at_el1:
     str     w10, [x9]
 
     // Set up the stack pointer (stack grows downward)
-    // Stack at 0x4F000000 - above heap (ends 0x41000000) and program area
-    // This gives plenty of room and avoids heap/stack collision
+    // Note: DTB is at 0x40000000, our RAM starts at 0x40010000 (linker.ld)
+    // Stack at 0x4F000000 - above heap and program region
     mov     w10, #'S'
     str     w10, [x9]
     ldr     x0, =0x4F000000       // Stack top in RAM (above heap and programs)

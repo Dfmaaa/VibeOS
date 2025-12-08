@@ -14,13 +14,14 @@ VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targe
 - **Human**: Vibes only. Yells "fuck yeah" when things work. Cannot provide technical guidance.
 - **Claude**: Full technical lead. Makes all architecture decisions. Wozniak energy.
 
-## Current State (Last Updated: Session 25)
+## Current State (Last Updated: Session 26)
 - [x] Bootloader (boot/boot.S) - Sets up stack, clears BSS, jumps to kernel
 - [x] Minimal kernel (kernel/kernel.c) - UART output working
 - [x] Linker script (linker.ld) - Memory layout for QEMU virt
 - [x] Makefile - Builds and runs in QEMU
 - [x] Boots successfully! Prints to serial console.
-- [x] Memory management (kernel/memory.c) - malloc/free working, 255MB heap
+- [x] Memory management (kernel/memory.c) - malloc/free working, dynamic heap sizing
+- [x] DTB parsing (kernel/dtb.c) - Detects RAM size at runtime from Device Tree
 - [x] String functions (kernel/string.c) - memcpy, strlen, strcmp, strtok_r, etc.
 - [x] Printf (kernel/printf.c) - %d, %s, %x, %p working
 - [x] Framebuffer (kernel/fb.c) - ramfb device, 800x600
@@ -103,7 +104,8 @@ Phase 4: GUI (IN PROGRESS)
 ### Key Files
 - boot/boot.S - Entry point, EL3→EL1 transition, BSS clear, .data copy
 - kernel/kernel.c - Main kernel code
-- kernel/memory.c/.h - Heap allocator (malloc/free)
+- kernel/dtb.c/.h - Device Tree Blob parser (RAM detection)
+- kernel/memory.c/.h - Heap allocator (malloc/free), dynamic sizing
 - kernel/string.c/.h - String/memory functions
 - kernel/printf.c/.h - Printf implementation
 - kernel/fb.c/.h - Framebuffer driver (ramfb)
@@ -191,7 +193,7 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
 | Multitasking | Cooperative | Programs call yield(), round-robin scheduler |
 | Filesystem | FAT32 on virtio-blk | Persistent, mountable on host, read/write |
 | Shell | POSIX-ish | Familiar syntax, basic redirects |
-| RAM | 256MB | Configurable |
+| RAM | Detected via DTB | Works with 256MB-4GB+, heap sized dynamically |
 | Disk | 64MB FAT32 | Persistent storage via virtio-blk |
 | Interrupts | GIC-400 | Keyboard & mouse via IRQ, boots at EL3 for full GIC access |
 | Power | WFI idle | Scheduler sleeps CPU when no work, wakes on interrupt |
@@ -230,6 +232,8 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
 - **FP context switch**: When FPU is enabled, context_switch must save/restore q0-q31, fpcr, fpsr. The fp_regs array must be 16-byte aligned (stp/ldp q regs require this). Added padding to cpu_context_t to ensure fp_regs is at offset 0x80.
 - **-mstrict-align required with FPU**: Without -mgeneral-regs-only, GCC uses SIMD for memcpy/struct copies. Some SIMD loads require aligned addresses. Use -mstrict-align to prevent unaligned SIMD access faults.
 - **Kernel stack vs heap collision**: Heap runs from `_bss_end + 0x10000` to `0x41000000`. If kernel stack is inside this range, large allocations (like framebuffer backbuffer) will overwrite the stack. Symptom: local variables corrupted with data like `0x00ffffff` (COLOR_WHITE). Stack was at 0x40100000 (inside heap!). Moved to 0x4F000000 (well above heap and program area).
+- **DTB at RAM start**: QEMU places the Device Tree Blob at 0x40000000 (start of RAM). Linker script must start .data/.bss after DTB area (we use 0x40200000, leaving 2MB for DTB).
+- **DTB unaligned access**: Reading 32/64-bit values from DTB can cause alignment faults on ARM. Read bytes individually and assemble manually (see `read_be32`/`read_be64` in dtb.c).
 
 ## Session Log
 ### Session 1
@@ -656,19 +660,18 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
   - Fix: Moved stack to 0x4F000000, well above heap and program load area
 - **Memory layout clarified:**
   ```
-  0x40000000 - 0x4002c0d4: Kernel code/data/BSS
-  0x4003c0d4 - 0x41000000: Heap (~13MB)
-  0x41000000 - 0x4E000000: Program load area
-  0x4F000000:              Kernel stack (grows down)
-  0x50000000:              End of 256MB RAM
+  0x40000000 - 0x40200000: DTB (Device Tree Blob, placed by QEMU)
+  0x40200000 - 0x40237000: Kernel .data/.bss
+  0x40247000 - 0x4E000000: Heap (dynamic, up to stack - 1MB)
+  0x4E000000+:             Program load area (after heap)
+  0x4F000000:              Kernel stack (grows down, hardcoded)
+  RAM end:                 Detected from DTB (256MB-4GB+)
   ```
-- **Recurring issue: memory collisions**
-  - This is the 3rd or 4th time we've had stack/heap/BSS overlap bugs
-  - All memory regions use hardcoded magic numbers that aren't coordinated
-  - As kernel grows, these collisions happen more often
-  - **Proper fix**: Use MMU with guard pages - hardware catches violations
-  - **Band-aid fix**: Centralize memory layout in one place with runtime checks
-  - For now, just moved stack way up and documented the layout
+- **Memory collision issue (MOSTLY FIXED in Session 26)**
+  - Was: hardcoded magic numbers everywhere that collided as kernel grew
+  - Now: heap and program areas are dynamic based on DTB-detected RAM
+  - Stack is still hardcoded at 0x4F000000 (works for 256MB+ systems)
+  - Heap is bounded by stack address, so can't overflow into stack anymore
 - **Achievement**: Floating point works! Calculator does decimals! Processes exit cleanly!
 
 - **Enabled -O3 optimization!**
@@ -700,6 +703,31 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
   - Apps use macros to alias old function names (buf_*, bb_*) to new gfx_* calls
   - Zero runtime overhead, compiler inlines everything
 - **Achievement**: Cleaner codebase! Shared graphics primitives!
+
+### Session 26
+- **Device Tree Blob (DTB) parsing - RAM detection at runtime!**
+  - Built DTB parser (`kernel/dtb.c`, `kernel/dtb.h`)
+  - Parses QEMU's device tree to find memory node with base/size
+  - Tested with 256MB, 1GB, 4GB - all detected correctly
+- **Dynamic memory layout - no more hardcoded heap size!**
+  - Linker script now starts RAM at 0x40200000 (preserves DTB at 0x40000000)
+  - Heap size computed at runtime: from BSS end to (stack - 1MB buffer)
+  - Program load area follows heap_end dynamically
+  - Framebuffer now allocated via malloc instead of hardcoded address
+- **Memory layout now:**
+  - DTB preserved at 0x40000000 (up to 2MB reserved)
+  - Kernel .data/.bss at 0x40200000+
+  - Heap from BSS end to 0x4E000000 (~238MB on 256MB system)
+  - Programs load after heap
+  - Stack still hardcoded at 0x4F000000 (works for 256MB+ systems)
+- **Key insight:** One shared address space (Win3.1 model)
+  - Heap is shared by kernel + all apps
+  - App static variables (`int x = 3`) live in ELF's .data section, loaded into program area
+  - Only explicit `malloc()` uses the heap
+- **Gotcha: DTB unaligned access**
+  - Direct pointer casts to read 32/64-bit values cause alignment faults
+  - Must read bytes individually and assemble (see `read_be32`/`read_be64`)
+- **Achievement**: RAM detected dynamically! No more arbitrary 256MB cap!
 
 **NEXT SESSION TODO:**
 - Port minimp3 decoder (now possible with floats!)
