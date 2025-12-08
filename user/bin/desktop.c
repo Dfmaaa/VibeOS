@@ -360,13 +360,68 @@ static void draw_tetris_icon(int x, int y, int highlighted) {
     }
 }
 
+// ============ Notepad Icon (32x32 bitmap) ============
+
+static const uint8_t notepad_icon[32][32] = {
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,0,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1,0,0,0},
+    {0,0,0,1,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+};
+
+// Colors: 0=transparent, 1=black (outline), 2=white (paper)
+static void draw_notepad_icon(int x, int y, int highlighted) {
+    for (int row = 0; row < 32; row++) {
+        for (int col = 0; col < 32; col++) {
+            uint8_t p = notepad_icon[row][col];
+            uint32_t color;
+            switch (p) {
+                case 0: continue; // transparent
+                case 1: color = COLOR_BLACK; break;
+                case 2: color = highlighted ? 0x00FFFFCC : COLOR_WHITE; break; // paper
+                default: continue;
+            }
+            bb_put_pixel(x + col, y + row, color);
+        }
+    }
+}
+
 // ============ Dock ============
 
 #define DOCK_APP_CALC 0
 #define DOCK_APP_FILES 1
 #define DOCK_APP_SNAKE 2
 #define DOCK_APP_TETRIS 3
-#define DOCK_APP_COUNT 4
+#define DOCK_APP_NOTEPAD 4
+#define DOCK_APP_COUNT 5
 
 static int dock_hover = -1;
 
@@ -403,6 +458,11 @@ static void draw_dock(void) {
     x += DOCK_ICON_SIZE + DOCK_PADDING;
     draw_tetris_icon(x, icon_y, dock_hover == DOCK_APP_TETRIS);
     bb_draw_string(x - 8, icon_y + DOCK_ICON_SIZE + 2, "Tetris", COLOR_BLACK, 0x00C0C0C0);
+
+    // Draw notepad icon
+    x += DOCK_ICON_SIZE + DOCK_PADDING;
+    draw_notepad_icon(x, icon_y, dock_hover == DOCK_APP_NOTEPAD);
+    bb_draw_string(x - 4, icon_y + DOCK_ICON_SIZE + 2, "Notes", COLOR_BLACK, 0x00C0C0C0);
 }
 
 static int dock_hit_test(int mx, int my) {
@@ -432,6 +492,11 @@ static int dock_hit_test(int mx, int my) {
     x += DOCK_ICON_SIZE + DOCK_PADDING;
     if (point_in_rect(mx, my, x, icon_y, DOCK_ICON_SIZE, DOCK_ICON_SIZE)) {
         return DOCK_APP_TETRIS;
+    }
+
+    x += DOCK_ICON_SIZE + DOCK_PADDING;
+    if (point_in_rect(mx, my, x, icon_y, DOCK_ICON_SIZE, DOCK_ICON_SIZE)) {
+        return DOCK_APP_NOTEPAD;
     }
 
     return -1;
@@ -951,6 +1016,461 @@ static void open_files(void) {
     files_refresh();
 
     files_window = create_window(150, 60, 280, 320, "Files", draw_files_content);
+}
+
+// ============ Text Editor (Notepad) State ============
+
+#define NOTEPAD_MAX_LINES 256
+#define NOTEPAD_MAX_LINE_LEN 256
+#define NOTEPAD_VISIBLE_LINES 18
+#define NOTEPAD_VISIBLE_COLS 40
+
+static int notepad_window = -1;
+static char notepad_path[FILES_PATH_MAX] = "";  // Empty = new file
+static char notepad_title[64] = "Untitled";
+static char *notepad_lines[NOTEPAD_MAX_LINES];  // Heap-allocated lines
+static int notepad_line_count = 0;
+static int notepad_cursor_line = 0;
+static int notepad_cursor_col = 0;
+static int notepad_scroll_line = 0;
+static int notepad_scroll_col = 0;
+static int notepad_modified = 0;
+static int notepad_active = 0;  // Is notepad the focused window?
+
+// Forward declarations
+static void open_notepad(void);
+static void open_notepad_file(const char *path);
+
+static void notepad_clear(void) {
+    // Free existing lines
+    for (int i = 0; i < notepad_line_count; i++) {
+        if (notepad_lines[i]) {
+            api->free(notepad_lines[i]);
+            notepad_lines[i] = 0;
+        }
+    }
+    notepad_line_count = 0;
+    notepad_cursor_line = 0;
+    notepad_cursor_col = 0;
+    notepad_scroll_line = 0;
+    notepad_scroll_col = 0;
+    notepad_modified = 0;
+    notepad_path[0] = '\0';
+    str_copy(notepad_title, "Untitled", 64);
+}
+
+static char *notepad_alloc_line(void) {
+    char *line = (char *)api->malloc(NOTEPAD_MAX_LINE_LEN);
+    if (line) {
+        line[0] = '\0';
+    }
+    return line;
+}
+
+static void notepad_new(void) {
+    notepad_clear();
+    // Start with one empty line
+    notepad_lines[0] = notepad_alloc_line();
+    if (notepad_lines[0]) {
+        notepad_line_count = 1;
+    }
+}
+
+static void notepad_load(const char *path) {
+    notepad_clear();
+
+    void *file = api->open(path);
+    if (!file || api->is_dir(file)) {
+        // File doesn't exist or is a directory - start fresh
+        notepad_new();
+        str_copy(notepad_path, path, FILES_PATH_MAX);
+        // Extract filename for title
+        const char *slash = path;
+        for (const char *p = path; *p; p++) {
+            if (*p == '/') slash = p + 1;
+        }
+        str_copy(notepad_title, slash, 60);
+        return;
+    }
+
+    // Read file content
+    char *buffer = (char *)api->malloc(8192);  // 8KB buffer
+    if (!buffer) {
+        notepad_new();
+        return;
+    }
+
+    int bytes_read = api->read(file, buffer, 8191, 0);
+    if (bytes_read < 0) bytes_read = 0;
+    buffer[bytes_read] = '\0';
+
+    // Parse into lines
+    char *p = buffer;
+    while (*p && notepad_line_count < NOTEPAD_MAX_LINES) {
+        notepad_lines[notepad_line_count] = notepad_alloc_line();
+        if (!notepad_lines[notepad_line_count]) break;
+
+        char *line = notepad_lines[notepad_line_count];
+        int col = 0;
+        while (*p && *p != '\n' && col < NOTEPAD_MAX_LINE_LEN - 1) {
+            line[col++] = *p++;
+        }
+        line[col] = '\0';
+        notepad_line_count++;
+
+        if (*p == '\n') p++;  // Skip newline
+    }
+
+    api->free(buffer);
+
+    // Ensure at least one line
+    if (notepad_line_count == 0) {
+        notepad_lines[0] = notepad_alloc_line();
+        if (notepad_lines[0]) notepad_line_count = 1;
+    }
+
+    str_copy(notepad_path, path, FILES_PATH_MAX);
+    // Extract filename for title
+    const char *slash = path;
+    for (const char *q = path; *q; q++) {
+        if (*q == '/') slash = q + 1;
+    }
+    str_copy(notepad_title, slash, 60);
+}
+
+static void notepad_save(void) {
+    if (notepad_path[0] == '\0') return;  // No path set
+
+    // Build content
+    int total_size = 0;
+    for (int i = 0; i < notepad_line_count; i++) {
+        total_size += str_len(notepad_lines[i]) + 1;  // +1 for newline
+    }
+
+    char *buffer = (char *)api->malloc(total_size + 1);
+    if (!buffer) return;
+
+    char *p = buffer;
+    for (int i = 0; i < notepad_line_count; i++) {
+        char *line = notepad_lines[i];
+        while (*line) {
+            *p++ = *line++;
+        }
+        *p++ = '\n';
+    }
+    *p = '\0';
+
+    // Create or open file
+    void *file = api->open(notepad_path);
+    if (!file) {
+        file = api->create(notepad_path);
+    }
+
+    if (file) {
+        api->write(file, buffer, total_size);
+        notepad_modified = 0;
+    }
+
+    api->free(buffer);
+}
+
+static void notepad_ensure_cursor_visible(void) {
+    // Vertical scrolling
+    if (notepad_cursor_line < notepad_scroll_line) {
+        notepad_scroll_line = notepad_cursor_line;
+    }
+    if (notepad_cursor_line >= notepad_scroll_line + NOTEPAD_VISIBLE_LINES) {
+        notepad_scroll_line = notepad_cursor_line - NOTEPAD_VISIBLE_LINES + 1;
+    }
+
+    // Horizontal scrolling
+    if (notepad_cursor_col < notepad_scroll_col) {
+        notepad_scroll_col = notepad_cursor_col;
+    }
+    if (notepad_cursor_col >= notepad_scroll_col + NOTEPAD_VISIBLE_COLS) {
+        notepad_scroll_col = notepad_cursor_col - NOTEPAD_VISIBLE_COLS + 1;
+    }
+}
+
+static void notepad_insert_char(char c) {
+    if (notepad_cursor_line >= notepad_line_count) return;
+
+    char *line = notepad_lines[notepad_cursor_line];
+    int len = str_len(line);
+
+    if (len >= NOTEPAD_MAX_LINE_LEN - 1) return;  // Line too long
+
+    // Shift characters right
+    for (int i = len + 1; i > notepad_cursor_col; i--) {
+        line[i] = line[i - 1];
+    }
+    line[notepad_cursor_col] = c;
+    notepad_cursor_col++;
+    notepad_modified = 1;
+    notepad_ensure_cursor_visible();
+}
+
+static void notepad_insert_newline(void) {
+    if (notepad_line_count >= NOTEPAD_MAX_LINES) return;
+
+    char *current_line = notepad_lines[notepad_cursor_line];
+    char *new_line = notepad_alloc_line();
+    if (!new_line) return;
+
+    // Copy rest of current line to new line
+    str_copy(new_line, current_line + notepad_cursor_col, NOTEPAD_MAX_LINE_LEN);
+    current_line[notepad_cursor_col] = '\0';
+
+    // Shift lines down
+    for (int i = notepad_line_count; i > notepad_cursor_line + 1; i--) {
+        notepad_lines[i] = notepad_lines[i - 1];
+    }
+    notepad_lines[notepad_cursor_line + 1] = new_line;
+    notepad_line_count++;
+
+    notepad_cursor_line++;
+    notepad_cursor_col = 0;
+    notepad_modified = 1;
+    notepad_ensure_cursor_visible();
+}
+
+static void notepad_backspace(void) {
+    if (notepad_cursor_col > 0) {
+        // Delete character before cursor
+        char *line = notepad_lines[notepad_cursor_line];
+        int len = str_len(line);
+        for (int i = notepad_cursor_col - 1; i < len; i++) {
+            line[i] = line[i + 1];
+        }
+        notepad_cursor_col--;
+        notepad_modified = 1;
+    } else if (notepad_cursor_line > 0) {
+        // Merge with previous line
+        char *prev_line = notepad_lines[notepad_cursor_line - 1];
+        char *curr_line = notepad_lines[notepad_cursor_line];
+        int prev_len = str_len(prev_line);
+        int curr_len = str_len(curr_line);
+
+        if (prev_len + curr_len < NOTEPAD_MAX_LINE_LEN) {
+            // Append current line to previous
+            for (int i = 0; i <= curr_len; i++) {
+                prev_line[prev_len + i] = curr_line[i];
+            }
+
+            // Free current line
+            api->free(curr_line);
+
+            // Shift lines up
+            for (int i = notepad_cursor_line; i < notepad_line_count - 1; i++) {
+                notepad_lines[i] = notepad_lines[i + 1];
+            }
+            notepad_lines[notepad_line_count - 1] = 0;
+            notepad_line_count--;
+
+            notepad_cursor_line--;
+            notepad_cursor_col = prev_len;
+            notepad_modified = 1;
+        }
+    }
+    notepad_ensure_cursor_visible();
+}
+
+static void notepad_delete(void) {
+    char *line = notepad_lines[notepad_cursor_line];
+    int len = str_len(line);
+
+    if (notepad_cursor_col < len) {
+        // Delete character at cursor
+        for (int i = notepad_cursor_col; i < len; i++) {
+            line[i] = line[i + 1];
+        }
+        notepad_modified = 1;
+    } else if (notepad_cursor_line < notepad_line_count - 1) {
+        // Merge with next line
+        char *next_line = notepad_lines[notepad_cursor_line + 1];
+        int next_len = str_len(next_line);
+
+        if (len + next_len < NOTEPAD_MAX_LINE_LEN) {
+            // Append next line to current
+            for (int i = 0; i <= next_len; i++) {
+                line[len + i] = next_line[i];
+            }
+
+            // Free next line
+            api->free(next_line);
+
+            // Shift lines up
+            for (int i = notepad_cursor_line + 1; i < notepad_line_count - 1; i++) {
+                notepad_lines[i] = notepad_lines[i + 1];
+            }
+            notepad_lines[notepad_line_count - 1] = 0;
+            notepad_line_count--;
+            notepad_modified = 1;
+        }
+    }
+}
+
+static void notepad_cursor_left(void) {
+    if (notepad_cursor_col > 0) {
+        notepad_cursor_col--;
+    } else if (notepad_cursor_line > 0) {
+        notepad_cursor_line--;
+        notepad_cursor_col = str_len(notepad_lines[notepad_cursor_line]);
+    }
+    notepad_ensure_cursor_visible();
+}
+
+static void notepad_cursor_right(void) {
+    int len = str_len(notepad_lines[notepad_cursor_line]);
+    if (notepad_cursor_col < len) {
+        notepad_cursor_col++;
+    } else if (notepad_cursor_line < notepad_line_count - 1) {
+        notepad_cursor_line++;
+        notepad_cursor_col = 0;
+    }
+    notepad_ensure_cursor_visible();
+}
+
+static void notepad_cursor_up(void) {
+    if (notepad_cursor_line > 0) {
+        notepad_cursor_line--;
+        int len = str_len(notepad_lines[notepad_cursor_line]);
+        if (notepad_cursor_col > len) notepad_cursor_col = len;
+    }
+    notepad_ensure_cursor_visible();
+}
+
+static void notepad_cursor_down(void) {
+    if (notepad_cursor_line < notepad_line_count - 1) {
+        notepad_cursor_line++;
+        int len = str_len(notepad_lines[notepad_cursor_line]);
+        if (notepad_cursor_col > len) notepad_cursor_col = len;
+    }
+    notepad_ensure_cursor_visible();
+}
+
+static void draw_notepad_content(window_t *win) {
+    int content_x = win->x + 2;
+    int content_y = win->y + TITLE_HEIGHT + 2;
+    int content_w = win->w - 4;
+    int content_h = win->h - TITLE_HEIGHT - 20;  // Leave room for status bar
+
+    // Background
+    bb_fill_rect(content_x, content_y, content_w, content_h, COLOR_WHITE);
+
+    // Draw text lines
+    for (int i = 0; i < NOTEPAD_VISIBLE_LINES && (notepad_scroll_line + i) < notepad_line_count; i++) {
+        int line_idx = notepad_scroll_line + i;
+        char *line = notepad_lines[line_idx];
+        int y = content_y + i * FONT_HEIGHT;
+
+        // Draw visible portion of line
+        int x = content_x + 2;
+        for (int j = notepad_scroll_col; line[j] && j < notepad_scroll_col + NOTEPAD_VISIBLE_COLS; j++) {
+            bb_draw_char(x, y, line[j], COLOR_BLACK, COLOR_WHITE);
+            x += FONT_WIDTH;
+        }
+    }
+
+    // Draw cursor (blinking would be nice but simple box for now)
+    if (notepad_active) {
+        int cursor_screen_line = notepad_cursor_line - notepad_scroll_line;
+        int cursor_screen_col = notepad_cursor_col - notepad_scroll_col;
+
+        if (cursor_screen_line >= 0 && cursor_screen_line < NOTEPAD_VISIBLE_LINES &&
+            cursor_screen_col >= 0 && cursor_screen_col < NOTEPAD_VISIBLE_COLS) {
+            int cx = content_x + 2 + cursor_screen_col * FONT_WIDTH;
+            int cy = content_y + cursor_screen_line * FONT_HEIGHT;
+            // Draw cursor as a vertical bar
+            bb_vline(cx, cy, FONT_HEIGHT, COLOR_BLACK);
+            bb_vline(cx + 1, cy, FONT_HEIGHT, COLOR_BLACK);
+        }
+    }
+
+    // Status bar
+    int status_y = win->y + win->h - 18;
+    bb_fill_rect(win->x + 1, status_y, win->w - 2, 17, 0x00C0C0C0);
+    bb_hline(win->x + 1, status_y, win->w - 2, 0x00808080);
+
+    // Show line:col and modified status
+    char status[64];
+    int si = 0;
+    // "Ln X, Col Y"
+    status[si++] = 'L';
+    status[si++] = 'n';
+    status[si++] = ' ';
+    int ln = notepad_cursor_line + 1;
+    if (ln >= 100) status[si++] = '0' + (ln / 100) % 10;
+    if (ln >= 10) status[si++] = '0' + (ln / 10) % 10;
+    status[si++] = '0' + ln % 10;
+    status[si++] = ',';
+    status[si++] = ' ';
+    status[si++] = 'C';
+    status[si++] = 'o';
+    status[si++] = 'l';
+    status[si++] = ' ';
+    int col = notepad_cursor_col + 1;
+    if (col >= 100) status[si++] = '0' + (col / 100) % 10;
+    if (col >= 10) status[si++] = '0' + (col / 10) % 10;
+    status[si++] = '0' + col % 10;
+    if (notepad_modified) {
+        status[si++] = ' ';
+        status[si++] = '[';
+        status[si++] = 'M';
+        status[si++] = 'o';
+        status[si++] = 'd';
+        status[si++] = 'i';
+        status[si++] = 'f';
+        status[si++] = 'i';
+        status[si++] = 'e';
+        status[si++] = 'd';
+        status[si++] = ']';
+    }
+    status[si] = '\0';
+
+    bb_draw_string(win->x + 4, status_y + 2, status, COLOR_BLACK, 0x00C0C0C0);
+
+    // Save hint on right side
+    bb_draw_string(win->x + win->w - 80, status_y + 2, "Ctrl+S", 0x00606060, 0x00C0C0C0);
+}
+
+static void open_notepad(void) {
+    // Check if already open
+    if (notepad_window >= 0 && windows[notepad_window].visible) {
+        focused_window = notepad_window;
+        notepad_active = 1;
+        return;
+    }
+
+    notepad_new();
+
+    // Calculate size based on visible area
+    int w = NOTEPAD_VISIBLE_COLS * FONT_WIDTH + 10;
+    int h = TITLE_HEIGHT + NOTEPAD_VISIBLE_LINES * FONT_HEIGHT + 24;
+
+    notepad_window = create_window(80, 40, w, h, notepad_title, draw_notepad_content);
+    notepad_active = 1;
+}
+
+static void open_notepad_file(const char *path) {
+    // Close existing notepad window if open
+    if (notepad_window >= 0 && windows[notepad_window].visible) {
+        // Just load into existing window
+        notepad_load(path);
+        // Update window title
+        str_copy(windows[notepad_window].title, notepad_title, 32);
+        focused_window = notepad_window;
+        notepad_active = 1;
+        return;
+    }
+
+    notepad_load(path);
+
+    int w = NOTEPAD_VISIBLE_COLS * FONT_WIDTH + 10;
+    int h = TITLE_HEIGHT + NOTEPAD_VISIBLE_LINES * FONT_HEIGHT + 24;
+
+    notepad_window = create_window(80, 40, w, h, notepad_title, draw_notepad_content);
+    notepad_active = 1;
 }
 
 // ============ Context Menu ============
@@ -1566,6 +2086,8 @@ int main(kapi_t *kapi, int argc, char **argv) {
                 } else if (dock_app == DOCK_APP_TETRIS) {
                     // Run tetris - blocks until it exits, then we resume
                     api->exec("/bin/tetris");
+                } else if (dock_app == DOCK_APP_NOTEPAD) {
+                    open_notepad();
                 }
                 needs_redraw = 1;
             }
@@ -1623,6 +2145,11 @@ int main(kapi_t *kapi, int argc, char **argv) {
                         if (win_idx == files_window) {
                             files_window = -1;
                         }
+                        // If closing notepad, reset notepad_window
+                        if (win_idx == notepad_window) {
+                            notepad_window = -1;
+                            notepad_active = 0;
+                        }
                         close_window(win_idx);
                         needs_redraw = 1;
                     } else if (point_in_rect(new_mx, new_my, win->x, win->y, win->w, TITLE_HEIGHT)) {
@@ -1631,11 +2158,13 @@ int main(kapi_t *kapi, int argc, char **argv) {
                         drag_offset_x = new_mx - win->x;
                         drag_offset_y = new_my - win->y;
                         focused_window = win_idx;
+                        notepad_active = (win_idx == notepad_window);
                         needs_redraw = 1;
                     } else {
                         // Clicked inside window content area
                         if (win_idx != focused_window) {
                             focused_window = win_idx;
+                            notepad_active = (win_idx == notepad_window);
                             needs_redraw = 1;
                         }
 
@@ -1662,8 +2191,20 @@ int main(kapi_t *kapi, int argc, char **argv) {
                                     if (files_types[entry] == 2) {
                                         // Navigate into directory
                                         files_navigate(files_entries[entry]);
+                                    } else {
+                                        // Open file in notepad
+                                        char fullpath[FILES_PATH_MAX];
+                                        int plen = str_len(files_path);
+                                        if (str_equal(files_path, "/")) {
+                                            fullpath[0] = '/';
+                                            str_copy(fullpath + 1, files_entries[entry], FILES_PATH_MAX - 1);
+                                        } else {
+                                            str_copy(fullpath, files_path, FILES_PATH_MAX);
+                                            fullpath[plen] = '/';
+                                            str_copy(fullpath + plen + 1, files_entries[entry], FILES_PATH_MAX - plen - 1);
+                                        }
+                                        open_notepad_file(fullpath);
                                     }
-                                    // For files, we could open them later
                                 } else {
                                     // First click - select
                                     files_selected = entry;
@@ -1726,6 +2267,53 @@ int main(kapi_t *kapi, int argc, char **argv) {
                         rename_cursor++;
                         needs_redraw = 1;
                     }
+                }
+            } else if (notepad_active && notepad_window >= 0 && windows[notepad_window].visible) {
+                // Handle notepad keyboard input
+                // Arrow keys come as escape sequences: ESC [ A/B/C/D
+                if (c == 27) {
+                    // Escape sequence - check for arrow keys
+                    if (api->has_key()) {
+                        int c2 = api->getc();
+                        if (c2 == '[' && api->has_key()) {
+                            int c3 = api->getc();
+                            switch (c3) {
+                                case 'A': notepad_cursor_up(); break;    // Up
+                                case 'B': notepad_cursor_down(); break;  // Down
+                                case 'C': notepad_cursor_right(); break; // Right
+                                case 'D': notepad_cursor_left(); break;  // Left
+                                case '3':  // Delete key (ESC [ 3 ~)
+                                    if (api->has_key()) {
+                                        api->getc();  // consume '~'
+                                        notepad_delete();
+                                    }
+                                    break;
+                            }
+                            needs_redraw = 1;
+                        }
+                    }
+                } else if (c == 19) {
+                    // Ctrl+S - save
+                    notepad_save();
+                    needs_redraw = 1;
+                } else if (c == '\n' || c == '\r') {
+                    // Enter - new line
+                    notepad_insert_newline();
+                    needs_redraw = 1;
+                } else if (c == '\b' || c == 127) {
+                    // Backspace
+                    notepad_backspace();
+                    needs_redraw = 1;
+                } else if (c == '\t') {
+                    // Tab - insert spaces
+                    for (int i = 0; i < 4; i++) {
+                        notepad_insert_char(' ');
+                    }
+                    needs_redraw = 1;
+                } else if (c >= 32 && c < 127) {
+                    // Printable character
+                    notepad_insert_char((char)c);
+                    needs_redraw = 1;
                 }
             }
         }
