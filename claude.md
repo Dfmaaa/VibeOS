@@ -196,6 +196,7 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
 - **Userspace has no stdint.h**: Use `unsigned long` instead of `uint64_t` in user programs, or define types in vibe.h.
 - **PIE on AArch64**: Use `-fPIE` and `-pie` flags. AArch64 uses PC-relative addressing (ADRP+ADD) so no runtime relocations needed.
 - **Context switch**: Only need to save callee-saved registers (x19-x30, sp). Caller-saved regs are already on stack.
+- **PIE static variables**: Static/global variables in PIE userspace programs don't work reliably. Writes to BSS hang. Use heap allocation and pass pointers instead. Small programs (echo, ls) work fine; complex ones with large static state fail.
 
 ## Session Log
 ### Session 1
@@ -355,6 +356,28 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
   - Clean handoff - no screen fighting between processes
 - **Achievement**: Can launch games from dock and return to desktop!
 
+### Session 14
+- Built userspace shell `/bin/vibesh`:
+  - Boots directly into vibesh (kernel shell is now just a bootstrap)
+  - Parses commands, handles builtins (cd, exit, help)
+  - Executes external programs from /bin with argument passing
+- Built userspace coreutils:
+  - `/bin/echo` - with output redirection support (echo foo > file)
+  - `/bin/ls` - uses proper readdir API
+  - `/bin/cat` - supports multiple files
+  - `/bin/pwd` - print working directory
+  - `/bin/mkdir`, `/bin/touch`, `/bin/rm` - file operations
+- Added `exec_args` to kapi for passing argc/argv to programs
+- Added `console_rows`/`console_cols` to kapi
+- Fixed process exit bug:
+  - process_exit() was returning when no other processes existed
+  - Now context switches directly back to kernel_context
+- Attempted userspace vi but hit PIE/BSS issues:
+  - Static variables in PIE binaries don't work reliably
+  - Even heap-allocated state with function pointer calls hangs
+  - Abandoned - will make GUI editor instead
+- **Achievement**: Userspace shell and coreutils working!
+
 **NEXT SESSION TODO:**
-- Build notepad app (text editing in window)
 - Build terminal emulator (shell in window - biggest unlock)
+- Build notepad/GUI text editor

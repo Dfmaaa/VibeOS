@@ -53,8 +53,13 @@ typedef struct {
     // Process
     void (*exit)(int status);
     int  (*exec)(const char *path);   // Run another program (waits for completion)
+    int  (*exec_args)(const char *path, int argc, char **argv);  // Run with arguments
     void (*yield)(void);              // Give up CPU to other processes
     int  (*spawn)(const char *path);  // Start a new process (returns immediately)
+
+    // Console info
+    int  (*console_rows)(void);       // Get number of console rows
+    int  (*console_cols)(void);       // Get number of console columns
 
     // Framebuffer (for GUI programs)
     uint32_t *fb_base;               // Direct framebuffer pointer

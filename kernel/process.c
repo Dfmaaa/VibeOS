@@ -231,30 +231,32 @@ void process_exit(int status) {
         return;
     }
 
-    process_t *proc = &proc_table[current_pid];
+    int slot = current_pid;
+    process_t *proc = &proc_table[slot];
     printf("[PROC] Process '%s' (pid %d) exited with status %d\n",
            proc->name, proc->pid, status);
 
     proc->exit_status = status;
     proc->state = PROC_STATE_ZOMBIE;
 
-    // Free stack
-    if (proc->stack_base) {
-        free(proc->stack_base);
-        proc->stack_base = NULL;
-    }
-
-    // TODO: Could reclaim program memory too
+    // Free stack - but we're still on it! Don't free yet.
+    // The stack will be freed when the slot is reused.
 
     // Mark slot as free (simple cleanup for now)
     proc->state = PROC_STATE_FREE;
 
-    // Switch to another process or return to kernel
+    // We're done with this process - switch back to kernel context
+    // This MUST not return - we context switch away
     current_pid = -1;
-    process_schedule();
 
-    // If schedule returned, no other processes - we're done
-    // This shouldn't happen in normal operation
+    // Switch directly back to kernel context
+    // This will resume in process_exec_args() or process_schedule()
+    // wherever the kernel was waiting
+    context_switch(&proc->context, &kernel_context);
+
+    // Should never reach here
+    printf("[PROC] ERROR: process_exit returned!\n");
+    while(1);
 }
 
 // Yield - voluntarily give up CPU

@@ -53,6 +53,11 @@ static int kapi_exec(const char *path) {
     return process_exec(path);
 }
 
+// Wrapper for exec with arguments
+static int kapi_exec_args(const char *path, int argc, char **argv) {
+    return process_exec_args(path, argc, argv);
+}
+
 // Wrapper for spawn - create and start a new process
 static int kapi_spawn(const char *path) {
     char *argv[1] = { (char *)path };
@@ -161,8 +166,13 @@ void kapi_init(void) {
     // Process
     kapi.exit = kapi_exit;
     kapi.exec = kapi_exec;
+    kapi.exec_args = kapi_exec_args;
     kapi.yield = process_yield;
     kapi.spawn = kapi_spawn;
+
+    // Console info
+    kapi.console_rows = console_rows;
+    kapi.console_cols = console_cols;
 
     // Framebuffer
     kapi.fb_base = fb_base;

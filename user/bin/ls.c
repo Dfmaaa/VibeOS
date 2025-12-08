@@ -1,54 +1,55 @@
 /*
  * ls - list directory contents
+ *
+ * Uses the proper readdir API instead of accessing VFS internals.
  */
 
 #include "../lib/vibe.h"
 
-// VFS node structure (must match kernel)
-typedef struct vfs_node {
-    char name[64];
-    size_t size;
-    int is_directory;
-    struct vfs_node *parent;
-    struct vfs_node *children;
-    struct vfs_node *next;
-    char *data;
-} vfs_node_t;
-
 int main(kapi_t *k, int argc, char **argv) {
-    const char *path = argc > 1 ? argv[1] : ".";
+    const char *path = ".";
 
-    void *node = k->open(path);
-    if (!node) {
-        k->puts("ls: cannot access '");
+    if (argc > 1) {
+        path = argv[1];
+    }
+
+    void *dir = k->open(path);
+    if (!dir) {
+        k->set_color(COLOR_RED, COLOR_BLACK);
+        k->puts("ls: ");
         k->puts(path);
-        k->puts("': No such file or directory\n");
+        k->puts(": No such file or directory\n");
+        k->set_color(COLOR_WHITE, COLOR_BLACK);
         return 1;
     }
 
-    if (!k->is_dir(node)) {
-        // Just print the filename
+    if (!k->is_dir(dir)) {
+        // It's a file, just print the name
         k->puts(path);
         k->putc('\n');
         return 0;
     }
 
-    // List directory contents
-    vfs_node_t *dir = (vfs_node_t *)node;
-    vfs_node_t *child = dir->children;
+    // List directory contents using readdir
+    char name[256];
+    uint8_t type;
+    int index = 0;
 
-    while (child) {
-        if (child->is_directory) {
+    while (k->readdir(dir, index, name, sizeof(name), &type) >= 0) {
+        if (type == 2) {
+            // Directory
             k->set_color(COLOR_CYAN, COLOR_BLACK);
+            k->puts(name);
+            k->putc('/');
         } else {
+            // File
             k->set_color(COLOR_WHITE, COLOR_BLACK);
+            k->puts(name);
         }
-        k->puts(child->name);
-        k->set_color(COLOR_WHITE, COLOR_BLACK);
-        k->puts("  ");
-        child = child->next;
+        k->putc('\n');
+        index++;
     }
-    k->putc('\n');
 
+    k->set_color(COLOR_WHITE, COLOR_BLACK);
     return 0;
 }

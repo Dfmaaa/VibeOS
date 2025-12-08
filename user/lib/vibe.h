@@ -50,8 +50,13 @@ typedef struct kapi {
     // Process
     void (*exit)(int status);
     int  (*exec)(const char *path);   // Run another program (waits for completion)
+    int  (*exec_args)(const char *path, int argc, char **argv);  // Run with arguments
     void (*yield)(void);              // Give up CPU to other processes
     int  (*spawn)(const char *path);  // Start a new process (returns immediately)
+
+    // Console info
+    int  (*console_rows)(void);       // Get number of console rows
+    int  (*console_cols)(void);       // Get number of console columns
 
     // Framebuffer (for GUI programs)
     uint32_t *fb_base;
@@ -87,11 +92,80 @@ typedef struct kapi {
 #define COLOR_YELLOW  0x00FFFF00
 #define COLOR_AMBER   0x00FFBF00
 
-// String length
+// NULL pointer
+#ifndef NULL
+#define NULL ((void *)0)
+#endif
+
+// ============ String Functions ============
+
 static inline size_t strlen(const char *s) {
     size_t len = 0;
     while (s[len]) len++;
     return len;
+}
+
+static inline int strcmp(const char *a, const char *b) {
+    while (*a && *b && *a == *b) {
+        a++;
+        b++;
+    }
+    return *a - *b;
+}
+
+static inline int strncmp(const char *a, const char *b, size_t n) {
+    while (n > 0 && *a && *b && *a == *b) {
+        a++;
+        b++;
+        n--;
+    }
+    if (n == 0) return 0;
+    return *a - *b;
+}
+
+static inline char *strcpy(char *dst, const char *src) {
+    char *d = dst;
+    while ((*d++ = *src++));
+    return dst;
+}
+
+static inline char *strncpy_safe(char *dst, const char *src, size_t n) {
+    size_t i;
+    for (i = 0; i < n - 1 && src[i]; i++) {
+        dst[i] = src[i];
+    }
+    dst[i] = '\0';
+    return dst;
+}
+
+static inline char *strcat(char *dst, const char *src) {
+    char *d = dst;
+    while (*d) d++;
+    while ((*d++ = *src++));
+    return dst;
+}
+
+static inline void *memset(void *s, int c, size_t n) {
+    unsigned char *p = (unsigned char *)s;
+    while (n--) *p++ = (unsigned char)c;
+    return s;
+}
+
+static inline void *memcpy(void *dst, const void *src, size_t n) {
+    unsigned char *d = (unsigned char *)dst;
+    const unsigned char *s = (const unsigned char *)src;
+    while (n--) *d++ = *s++;
+    return dst;
+}
+
+// Check if character is whitespace
+static inline int isspace(int c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+// Check if character is printable
+static inline int isprint(int c) {
+    return c >= 32 && c < 127;
 }
 
 #endif
