@@ -715,9 +715,181 @@ static void str_to_fat_name(const char *name, char *fat_name) {
 static uint8_t fat_checksum(const char *short_name) {
     uint8_t sum = 0;
     for (int i = 0; i < 11; i++) {
-        sum = ((sum & 1) ? 0x80 : 0) + (sum >> 1) + short_name[i];
+        sum = ((sum & 1) ? 0x80 : 0) + (sum >> 1) + (uint8_t)short_name[i];
     }
     return sum;
+}
+
+// Check if a filename needs LFN (long filename) entries
+// Returns 1 if LFN needed, 0 if 8.3 is sufficient
+static int needs_lfn(const char *name) {
+    int len = strlen(name);
+
+    // Check length - 8.3 max is 12 chars (8 + dot + 3)
+    if (len > 12) return 1;
+
+    // Find the dot
+    const char *dot = NULL;
+    int dot_pos = -1;
+    for (int i = 0; name[i]; i++) {
+        if (name[i] == '.') {
+            if (dot) return 1;  // Multiple dots
+            dot = &name[i];
+            dot_pos = i;
+        }
+    }
+
+    // Check name part length (max 8)
+    int name_len = dot ? dot_pos : len;
+    if (name_len > 8) return 1;
+
+    // Check extension length (max 3)
+    if (dot && strlen(dot + 1) > 3) return 1;
+
+    // Check for invalid 8.3 characters or lowercase
+    for (int i = 0; name[i]; i++) {
+        char c = name[i];
+        // Lowercase needs LFN to preserve case
+        if (c >= 'a' && c <= 'z') return 1;
+        // Spaces need LFN (except trailing, but we don't allow those anyway)
+        if (c == ' ') return 1;
+        // These chars are invalid in 8.3 but some are ok in LFN
+        if (c == '+' || c == ',' || c == ';' || c == '=' || c == '[' || c == ']') return 1;
+    }
+
+    return 0;
+}
+
+// Generate a basis name for 8.3 from a long filename
+// Removes invalid chars, converts to uppercase, handles leading dots, etc.
+static void generate_basis_name(const char *name, char *basis, char *ext) {
+    memset(basis, ' ', 8);
+    memset(ext, ' ', 3);
+
+    // Skip leading dots and spaces
+    while (*name == '.' || *name == ' ') name++;
+
+    // Find the last dot for extension
+    const char *last_dot = NULL;
+    for (const char *p = name; *p; p++) {
+        if (*p == '.') last_dot = p;
+    }
+
+    // Copy name part (up to 8 chars, before last dot or end)
+    const char *end = last_dot ? last_dot : name + strlen(name);
+    int j = 0;
+    for (const char *p = name; p < end && j < 8; p++) {
+        char c = *p;
+        // Skip invalid chars and dots
+        if (c == ' ' || c == '.' || c == '+' || c == ',' || c == ';' ||
+            c == '=' || c == '[' || c == ']') continue;
+        // Convert to uppercase
+        if (c >= 'a' && c <= 'z') c -= 32;
+        basis[j++] = c;
+    }
+
+    // Copy extension (up to 3 chars, after last dot)
+    if (last_dot) {
+        last_dot++;  // Skip the dot
+        j = 0;
+        for (const char *p = last_dot; *p && j < 3; p++) {
+            char c = *p;
+            if (c == ' ' || c == '.') continue;
+            if (c >= 'a' && c <= 'z') c -= 32;
+            ext[j++] = c;
+        }
+    }
+}
+
+// Check if a short name already exists in a directory
+static int short_name_exists(uint32_t dir_cluster, const char *short_name) {
+    uint32_t cluster = dir_cluster;
+
+    while (cluster >= 2 && cluster < FAT32_EOC) {
+        if (read_cluster(cluster, cluster_buf) < 0) {
+            return 0;  // Error, assume doesn't exist
+        }
+
+        int entries_per_cluster = cluster_buf_size / 32;
+
+        for (int i = 0; i < entries_per_cluster; i++) {
+            uint8_t *e = cluster_buf + (i * 32);
+
+            if (e[0] == 0x00) return 0;  // End of dir
+            if (e[0] == 0xE5) continue;   // Deleted
+            if (e[11] == FAT_ATTR_LFN) continue;  // LFN entry
+
+            // Compare the 11-byte name
+            int match = 1;
+            for (int j = 0; j < 11; j++) {
+                if (e[j] != (uint8_t)short_name[j]) {
+                    match = 0;
+                    break;
+                }
+            }
+            if (match) return 1;
+        }
+
+        cluster = fat_next_cluster(cluster);
+    }
+
+    return 0;
+}
+
+// Generate a unique 8.3 short name with numeric tail (~1, ~2, etc.)
+static void generate_short_name(uint32_t dir_cluster, const char *long_name, char *short_name) {
+    char basis[8], ext[3];
+    generate_basis_name(long_name, basis, ext);
+
+    // Build initial short name
+    memcpy(short_name, basis, 8);
+    memcpy(short_name + 8, ext, 3);
+
+    // If no collision, we're done
+    if (!short_name_exists(dir_cluster, short_name)) {
+        return;
+    }
+
+    // Need numeric tail - try ~1 through ~99999
+    for (int n = 1; n <= 99999; n++) {
+        // Format the number
+        char num[8];
+        int num_len = 0;
+        int temp = n;
+        while (temp > 0) {
+            num[num_len++] = '0' + (temp % 10);
+            temp /= 10;
+        }
+
+        // Calculate how many basis chars we can keep
+        // Need room for ~ and the number
+        int tail_len = 1 + num_len;  // ~ plus digits
+        int keep = 8 - tail_len;
+        if (keep < 1) keep = 1;
+
+        // Build short name with tail
+        int j = 0;
+        for (int i = 0; i < keep && basis[i] != ' '; i++) {
+            short_name[j++] = basis[i];
+        }
+        short_name[j++] = '~';
+        // Add number (reversed)
+        for (int i = num_len - 1; i >= 0; i--) {
+            short_name[j++] = num[i];
+        }
+        // Pad with spaces
+        while (j < 8) {
+            short_name[j++] = ' ';
+        }
+        // Extension stays the same
+        memcpy(short_name + 8, ext, 3);
+
+        if (!short_name_exists(dir_cluster, short_name)) {
+            return;
+        }
+    }
+
+    // Exhausted all options (very unlikely), just use what we have
 }
 
 // Find the parent directory cluster and the filename component
@@ -772,18 +944,27 @@ static void write32(uint8_t *p, uint32_t val) {
     p[3] = (val >> 24) & 0xFF;
 }
 
-// Find a free directory entry slot in a directory cluster chain
-// Returns cluster and offset of free entry, or allocates new cluster if needed
-static int find_free_dir_entry(uint32_t dir_cluster, uint32_t *out_cluster, uint32_t *out_offset) {
-    uint32_t cluster = dir_cluster;
-    uint32_t prev_cluster = 0;
+// Find N consecutive free directory entry slots in a directory cluster chain
+// Returns cluster and offset of first free entry, or allocates new cluster if needed
+// out_clusters and out_offsets are arrays of size count (entries may span clusters)
+static int find_free_dir_entries(uint32_t dir_cluster, int count,
+                                  uint32_t *out_clusters, uint32_t *out_offsets) {
+    if (count <= 0) return -1;
 
-    while (cluster < FAT32_EOC) {
+    // Track all entries in directory for scanning
+    // We'll collect potential consecutive runs
+    uint32_t run_clusters[32];  // Max 32 entries for very long filenames
+    uint32_t run_offsets[32];
+    int run_len = 0;
+
+    uint32_t cluster = dir_cluster;
+    uint32_t last_cluster = dir_cluster;  // Track last valid cluster for chaining
+    int entries_per_cluster = cluster_buf_size / 32;
+
+    while (cluster >= 2 && cluster < FAT32_EOC) {
         if (read_cluster(cluster, cluster_buf) < 0) {
             return -1;
         }
-
-        int entries_per_cluster = cluster_buf_size / 32;
 
         for (int i = 0; i < entries_per_cluster; i++) {
             uint8_t *e = cluster_buf + (i * 32);
@@ -791,56 +972,228 @@ static int find_free_dir_entry(uint32_t dir_cluster, uint32_t *out_cluster, uint
 
             // Free entry (deleted or never used)
             if (first_byte == 0x00 || first_byte == 0xE5) {
-                *out_cluster = cluster;
-                *out_offset = i;
-                return 0;
+                run_clusters[run_len] = cluster;
+                run_offsets[run_len] = i;
+                run_len++;
+
+                if (run_len >= count) {
+                    // Found enough! Copy to output
+                    for (int j = 0; j < count; j++) {
+                        out_clusters[j] = run_clusters[j];
+                        out_offsets[j] = run_offsets[j];
+                    }
+                    return 0;
+                }
+
+                // If this was 0x00 (end of dir), rest of cluster is also free
+                if (first_byte == 0x00) {
+                    // Rest of this cluster is free
+                    for (int k = i + 1; k < entries_per_cluster && run_len < count; k++) {
+                        run_clusters[run_len] = cluster;
+                        run_offsets[run_len] = k;
+                        run_len++;
+                    }
+                    if (run_len >= count) {
+                        for (int j = 0; j < count; j++) {
+                            out_clusters[j] = run_clusters[j];
+                            out_offsets[j] = run_offsets[j];
+                        }
+                        return 0;
+                    }
+                    // Need more entries - allocate new cluster(s)
+                    last_cluster = cluster;
+                    goto need_more;
+                }
+            } else {
+                // Entry is used, reset run
+                run_len = 0;
             }
         }
 
-        prev_cluster = cluster;
+        last_cluster = cluster;
         cluster = fat_next_cluster(cluster);
     }
 
-    // Need to allocate a new cluster for the directory
-    uint32_t new_cluster = fat_alloc_cluster();
-    if (new_cluster == 0) return -1;
+need_more:
+    // We need to allocate new cluster(s) to complete the run
+    while (run_len < count) {
+        uint32_t new_cluster = fat_alloc_cluster();
+        if (new_cluster == 0) return -1;
 
-    // Link it to the chain
-    if (fat_set_cluster(prev_cluster, new_cluster) < 0) {
-        fat_set_cluster(new_cluster, FAT32_FREE);
-        return -1;
+        // Link to chain
+        if (fat_set_cluster(last_cluster, new_cluster) < 0) {
+            fat_set_cluster(new_cluster, FAT32_FREE);
+            return -1;
+        }
+
+        // Zero the new cluster
+        if (zero_cluster(new_cluster) < 0) {
+            return -1;
+        }
+
+        // Add entries from this cluster to the run
+        for (int i = 0; i < entries_per_cluster && run_len < count; i++) {
+            run_clusters[run_len] = new_cluster;
+            run_offsets[run_len] = i;
+            run_len++;
+        }
+
+        last_cluster = new_cluster;
     }
 
-    // Zero the new cluster
-    if (zero_cluster(new_cluster) < 0) {
-        return -1;
+    // Copy to output
+    for (int j = 0; j < count; j++) {
+        out_clusters[j] = run_clusters[j];
+        out_offsets[j] = run_offsets[j];
     }
-
-    *out_cluster = new_cluster;
-    *out_offset = 0;
     return 0;
 }
 
-// Create a new directory entry in a directory
-// Returns the first cluster of the new file/dir, or 0 on error
+// Legacy wrapper for single entry
+static int find_free_dir_entry(uint32_t dir_cluster, uint32_t *out_cluster, uint32_t *out_offset) {
+    return find_free_dir_entries(dir_cluster, 1, out_cluster, out_offset);
+}
+
+// Build an LFN entry at the given buffer location
+// seq: sequence number (1 = first, 2 = second, etc.)
+// is_last: set the "last" flag (0x40)
+// name: full long filename
+// checksum: checksum of the 8.3 short name
+static void build_lfn_entry(uint8_t *e, int seq, int is_last, const char *name, uint8_t checksum) {
+    int name_len = strlen(name);
+    int start = (seq - 1) * 13;  // Starting character index for this entry
+
+    memset(e, 0xFF, 32);  // Fill with 0xFF (unused chars are 0xFFFF in UTF-16)
+
+    // Order byte: sequence number, with 0x40 flag if last entry
+    e[0] = seq | (is_last ? 0x40 : 0);
+
+    // Attribute = LFN (0x0F)
+    e[11] = FAT_ATTR_LFN;
+
+    // Type = 0
+    e[12] = 0;
+
+    // Checksum of short name
+    e[13] = checksum;
+
+    // First cluster = 0 (always for LFN)
+    e[26] = 0;
+    e[27] = 0;
+
+    // Fill in the 13 characters for this entry
+    // name1: bytes 1-10 (5 UTF-16LE chars)
+    for (int i = 0; i < 5; i++) {
+        int idx = start + i;
+        if (idx < name_len) {
+            e[1 + i*2] = (uint8_t)name[idx];  // Low byte
+            e[2 + i*2] = 0;                    // High byte (ASCII, so always 0)
+        } else if (idx == name_len) {
+            // Null terminator
+            e[1 + i*2] = 0;
+            e[2 + i*2] = 0;
+        }
+        // else leave as 0xFFFF (already set)
+    }
+
+    // name2: bytes 14-25 (6 UTF-16LE chars)
+    for (int i = 0; i < 6; i++) {
+        int idx = start + 5 + i;
+        if (idx < name_len) {
+            e[14 + i*2] = (uint8_t)name[idx];
+            e[15 + i*2] = 0;
+        } else if (idx == name_len) {
+            e[14 + i*2] = 0;
+            e[15 + i*2] = 0;
+        }
+    }
+
+    // name3: bytes 28-31 (2 UTF-16LE chars)
+    for (int i = 0; i < 2; i++) {
+        int idx = start + 11 + i;
+        if (idx < name_len) {
+            e[28 + i*2] = (uint8_t)name[idx];
+            e[29 + i*2] = 0;
+        } else if (idx == name_len) {
+            e[28 + i*2] = 0;
+            e[29 + i*2] = 0;
+        }
+    }
+}
+
+// Create a new directory entry in a directory (with LFN support)
+// Returns 1 on success, 0 on error
 static uint32_t create_dir_entry(uint32_t parent_cluster, const char *name, uint8_t attr, uint32_t first_cluster) {
-    uint32_t entry_cluster, entry_offset;
+    int name_len = strlen(name);
+    int use_lfn = needs_lfn(name);
 
-    if (find_free_dir_entry(parent_cluster, &entry_cluster, &entry_offset) < 0) {
+    // Calculate how many entries we need
+    int lfn_entries = 0;
+    if (use_lfn) {
+        lfn_entries = (name_len + 12) / 13;  // Ceiling division
+    }
+    int total_entries = lfn_entries + 1;  // LFN entries + 1 short entry
+
+    // Sanity check
+    if (total_entries > 32) {
+        return 0;  // Filename too long
+    }
+
+    // Generate short name FIRST (before finding entries, since this also reads clusters)
+    char short_name[11];
+    if (use_lfn) {
+        generate_short_name(parent_cluster, name, short_name);
+    } else {
+        str_to_fat_name(name, short_name);
+    }
+
+    // Find consecutive free entries AFTER generating short name
+    uint32_t entry_clusters[32];
+    uint32_t entry_offsets[32];
+
+    if (find_free_dir_entries(parent_cluster, total_entries, entry_clusters, entry_offsets) < 0) {
         return 0;
     }
 
-    // Read the cluster containing the entry
-    if (read_cluster(entry_cluster, cluster_buf) < 0) {
+    // Calculate checksum of short name (needed for LFN entries)
+    uint8_t checksum = fat_checksum(short_name);
+
+    // Write LFN entries (in reverse order: highest sequence number first)
+    for (int i = 0; i < lfn_entries; i++) {
+        int seq = lfn_entries - i;  // Sequence numbers go from N down to 1
+        int is_last = (i == 0);     // First entry written is "last" in sequence
+
+        uint32_t clust = entry_clusters[i];
+        uint32_t offs = entry_offsets[i];
+
+        // Read cluster
+        if (read_cluster(clust, cluster_buf) < 0) {
+            return 0;
+        }
+
+        // Build LFN entry
+        uint8_t *e = cluster_buf + (offs * 32);
+        build_lfn_entry(e, seq, is_last, name, checksum);
+
+        // Write cluster back
+        if (write_cluster(clust, cluster_buf) < 0) {
+            return 0;
+        }
+    }
+
+    // Write the short (8.3) entry
+    uint32_t short_cluster = entry_clusters[lfn_entries];
+    uint32_t short_offset = entry_offsets[lfn_entries];
+
+    if (read_cluster(short_cluster, cluster_buf) < 0) {
         return 0;
     }
 
-    // Build the directory entry at the correct offset
-    uint8_t *e = cluster_buf + (entry_offset * 32);
+    uint8_t *e = cluster_buf + (short_offset * 32);
     memset(e, 0, 32);
 
-    // Convert name to 8.3 format
-    str_to_fat_name(name, (char *)e);
+    // Copy short name
+    memcpy(e, short_name, 11);
 
     // Set attributes
     e[11] = attr;
@@ -853,7 +1206,7 @@ static uint32_t create_dir_entry(uint32_t parent_cluster, const char *name, uint
     write32(e + 28, 0);
 
     // Write back the cluster
-    if (write_cluster(entry_cluster, cluster_buf) < 0) {
+    if (write_cluster(short_cluster, cluster_buf) < 0) {
         return 0;
     }
 
@@ -1055,6 +1408,140 @@ int fat32_write_file(const char *path, const void *buf, size_t size) {
     return (int)size;
 }
 
+// Delete a directory entry including its LFN entries
+// This finds all LFN entries associated with the 8.3 entry and marks them all as deleted
+static int delete_dir_entry_with_lfn(uint32_t dir_cluster, const char *name) {
+    uint32_t cluster = dir_cluster;
+
+    // We need to track LFN entries that might precede the 8.3 entry
+    // Store positions of LFN entries in the current "run"
+    uint32_t lfn_clusters[32];
+    uint32_t lfn_offsets[32];
+    int lfn_count = 0;
+
+    char entry_name[256];
+    char lfn_name[256];
+    int has_lfn = 0;
+
+    while (cluster >= 2 && cluster < FAT32_EOC) {
+        if (read_cluster(cluster, cluster_buf) < 0) {
+            return -1;
+        }
+
+        int entries_per_cluster = cluster_buf_size / 32;
+
+        for (int i = 0; i < entries_per_cluster; i++) {
+            uint8_t *e = cluster_buf + (i * 32);
+            uint8_t first_byte = e[0];
+            uint8_t attr = e[11];
+
+            // End of directory
+            if (first_byte == 0x00) {
+                return -1;  // Not found
+            }
+
+            // Deleted entry - reset LFN tracking
+            if (first_byte == 0xE5) {
+                has_lfn = 0;
+                lfn_count = 0;
+                continue;
+            }
+
+            // Long filename entry
+            if (attr == FAT_ATTR_LFN) {
+                uint8_t order = first_byte;
+                int seq = order & 0x1F;
+                int is_last = order & 0x40;
+
+                if (is_last) {
+                    has_lfn = 1;
+                    lfn_count = 0;
+                    memset(lfn_name, 0, sizeof(lfn_name));
+                }
+
+                // Track this LFN entry's position
+                if (lfn_count < 32) {
+                    lfn_clusters[lfn_count] = cluster;
+                    lfn_offsets[lfn_count] = i;
+                    lfn_count++;
+                }
+
+                // Extract characters from LFN entry
+                int base = (seq - 1) * 13;
+                for (int j = 0; j < 5; j++) {
+                    uint16_t c = e[1 + j*2] | (e[2 + j*2] << 8);
+                    if (c == 0 || c == 0xFFFF) break;
+                    if (base + j < 255) lfn_name[base + j] = (char)c;
+                }
+                for (int j = 0; j < 6; j++) {
+                    uint16_t c = e[14 + j*2] | (e[15 + j*2] << 8);
+                    if (c == 0 || c == 0xFFFF) break;
+                    if (base + 5 + j < 255) lfn_name[base + 5 + j] = (char)c;
+                }
+                for (int j = 0; j < 2; j++) {
+                    uint16_t c = e[28 + j*2] | (e[29 + j*2] << 8);
+                    if (c == 0 || c == 0xFFFF) break;
+                    if (base + 11 + j < 255) lfn_name[base + 11 + j] = (char)c;
+                }
+                continue;
+            }
+
+            // Regular entry - skip volume label
+            if (attr & FAT_ATTR_VOLUME_ID) {
+                has_lfn = 0;
+                lfn_count = 0;
+                continue;
+            }
+
+            // Get the name to compare
+            if (has_lfn) {
+                int k;
+                for (k = 0; lfn_name[k]; k++) {
+                    entry_name[k] = lfn_name[k];
+                }
+                entry_name[k] = '\0';
+            } else {
+                fat_name_to_str((char *)e, entry_name);
+            }
+
+            // Check if this is the entry we want to delete
+            if (name_match(entry_name, name)) {
+                // Found it! Now delete all associated entries
+
+                // First, delete LFN entries
+                for (int j = 0; j < lfn_count; j++) {
+                    if (read_cluster(lfn_clusters[j], cluster_buf) < 0) {
+                        return -1;
+                    }
+                    cluster_buf[lfn_offsets[j] * 32] = 0xE5;
+                    if (write_cluster(lfn_clusters[j], cluster_buf) < 0) {
+                        return -1;
+                    }
+                }
+
+                // Then delete the 8.3 entry
+                if (read_cluster(cluster, cluster_buf) < 0) {
+                    return -1;
+                }
+                cluster_buf[i * 32] = 0xE5;
+                if (write_cluster(cluster, cluster_buf) < 0) {
+                    return -1;
+                }
+
+                return 0;  // Success
+            }
+
+            // Reset LFN tracking for next entry
+            has_lfn = 0;
+            lfn_count = 0;
+        }
+
+        cluster = fat_next_cluster(cluster);
+    }
+
+    return -1;  // Not found
+}
+
 int fat32_delete(const char *path) {
     if (!fs_initialized) return -1;
 
@@ -1081,14 +1568,8 @@ int fat32_delete(const char *path) {
         fat_free_chain(first_cluster);
     }
 
-    // Mark directory entry as deleted
-    if (read_cluster(entry_cluster, cluster_buf) < 0) {
-        return -1;
-    }
-
-    cluster_buf[entry_offset * 32] = 0xE5;  // Deleted marker
-
-    return write_cluster(entry_cluster, cluster_buf);
+    // Delete the directory entry (including any LFN entries)
+    return delete_dir_entry_with_lfn(parent_cluster, filename);
 }
 
 int fat32_rename(const char *oldpath, const char *newname) {
@@ -1101,22 +1582,34 @@ int fat32_rename(const char *oldpath, const char *newname) {
         return -1;
     }
 
-    // Find the existing entry
+    // Find the existing entry to get its attributes, cluster, and size
     uint32_t entry_cluster, entry_offset;
     fat32_dirent_t *entry = find_entry_in_dir(parent_cluster, filename, &entry_cluster, &entry_offset);
     if (!entry) return -1;
 
-    // Read the cluster containing the entry
-    if (read_cluster(entry_cluster, cluster_buf) < 0) {
+    // Save the entry's data
+    uint8_t attr = entry->attr;
+    uint32_t first_cluster = ((uint32_t)entry->cluster_hi << 16) | entry->cluster_lo;
+    uint32_t size = entry->size;
+
+    // Delete the old entry (including LFN)
+    if (delete_dir_entry_with_lfn(parent_cluster, filename) < 0) {
         return -1;
     }
 
-    // Update the name in the entry
-    uint8_t *e = cluster_buf + (entry_offset * 32);
-    str_to_fat_name(newname, (char *)e);
+    // Create a new entry with the new name (with LFN if needed)
+    if (!create_dir_entry(parent_cluster, newname, attr, first_cluster)) {
+        return -1;
+    }
 
-    // Write back
-    return write_cluster(entry_cluster, cluster_buf);
+    // Update the size in the new entry (create_dir_entry sets it to 0)
+    if (size > 0) {
+        if (update_dir_entry(parent_cluster, newname, first_cluster, size) < 0) {
+            return -1;
+        }
+    }
+
+    return 0;
 }
 
 // Check if directory is empty (only has . and ..)
@@ -1196,14 +1689,8 @@ int fat32_delete_dir(const char *path) {
         fat_free_chain(dir_cluster);
     }
 
-    // Mark directory entry as deleted
-    if (read_cluster(entry_cluster, cluster_buf) < 0) {
-        return -1;
-    }
-
-    cluster_buf[entry_offset * 32] = 0xE5;  // Deleted marker
-
-    return write_cluster(entry_cluster, cluster_buf);
+    // Delete the directory entry (including any LFN entries)
+    return delete_dir_entry_with_lfn(parent_cluster, dirname);
 }
 
 // Forward declaration for recursion
@@ -1320,12 +1807,6 @@ int fat32_delete_recursive(const char *path) {
         fat_free_chain(first_cluster);
     }
 
-    // Mark directory entry as deleted
-    if (read_cluster(entry_cluster, cluster_buf) < 0) {
-        return -1;
-    }
-
-    cluster_buf[entry_offset * 32] = 0xE5;  // Deleted marker
-
-    return write_cluster(entry_cluster, cluster_buf);
+    // Delete the directory entry (including any LFN entries)
+    return delete_dir_entry_with_lfn(parent_cluster, name);
 }

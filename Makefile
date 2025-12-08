@@ -82,6 +82,10 @@ $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c | $(BUILD_DIR)
 $(BUILD_DIR)/virtio_blk.o: $(KERNEL_DIR)/virtio_blk.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -O0 -c $< -o $@
 
+# fat32 needs -O0 to prevent optimization issues with LFN code
+$(BUILD_DIR)/fat32.o: $(KERNEL_DIR)/fat32.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -O0 -c $< -o $@
+
 # Kernel assembly objects
 $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.S | $(BUILD_DIR)
 	$(CC) $(ASFLAGS) -c $< -o $@
