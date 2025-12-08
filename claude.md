@@ -1,5 +1,7 @@
 # VibeOS - Claude Context
 
+**IMPORTANT: THERE IS NEVER A READ-ONLY DISK ERROR. `make clean && make` WILL PREPARE THE DISK CORRECTLY AND IT WILL WORK. DO NOT USE HDIUTIL TO CHECK OR DEBUG DISK ISSUES.**
+
 ## Project Overview
 VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targeting QEMU's virt machine. This is a science experiment to see what an LLM can build.
 
@@ -12,7 +14,7 @@ VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targe
 - **Human**: Vibes only. Yells "fuck yeah" when things work. Cannot provide technical guidance.
 - **Claude**: Full technical lead. Makes all architecture decisions. Wozniak energy.
 
-## Current State (Last Updated: Session 15)
+## Current State (Last Updated: Session 16)
 - [x] Bootloader (boot/boot.S) - Sets up stack, clears BSS, jumps to kernel
 - [x] Minimal kernel (kernel/kernel.c) - UART output working
 - [x] Linker script (linker.ld) - Memory layout for QEMU virt
@@ -72,8 +74,10 @@ Phase 4: GUI (IN PROGRESS)
 13. ~~Mouse driver~~ - virtio-tablet support
 14. ~~Window manager~~ - /bin/desktop with draggable windows, close boxes
 15. ~~Double buffering~~ - reduces flicker
-16. Terminal emulator, notepad, dock - TODO
-17. DOOM?
+16. ~~Terminal emulator~~ - /bin/term with stdio hooks
+17. ~~Visual refresh~~ - True 1-bit B&W System 7 aesthetic
+18. Notepad/text editor, file explorer - TODO
+19. DOOM?
 
 ## Technical Notes
 
@@ -403,7 +407,29 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
   - Desktop registers these functions at startup
 - **Achievement**: Can now write normal C code in userspace! This unlocks everything.
 
+### Session 16
+- **Visual refresh - True Mac System 7 aesthetic!**
+  - Pure 1-bit black & white color scheme
+  - Classic Mac diagonal checkerboard desktop pattern
+  - Apple logo (16x16 bitmap) in menu bar
+  - Beautiful 32x32 pixel art dock icons: Snake, Tetris, Calculator, Files, Terminal
+  - System 7 window chrome: horizontal stripes on focused title bars, drop shadows, double-line borders
+  - Close box with inner square when focused
+  - Clock in menu bar (decorative)
+- **Built Terminal Emulator (`/bin/term`)!**
+  - 80x24 character window with monospace font
+  - Spawns vibesh shell inside the window
+  - Stdio hooks mechanism: `stdio_putc`, `stdio_puts`, `stdio_getc`, `stdio_has_key`
+  - Shell and all coreutils use hooks when available, fall back to console otherwise
+  - Keyboard input via window events → ring buffer → shell reads
+  - Inverse block cursor
+- **Updated all coreutils for terminal support:**
+  - ls, cat, echo, pwd, mkdir, touch, rm all use `out_puts`/`out_putc` helpers
+  - Check for stdio hooks, use them if set, otherwise use console I/O
+  - Works in both kernel console AND terminal window
+- **Achievement**: Shell running inside a GUI window! Can run commands, see output, everything works!
+
 **NEXT SESSION TODO:**
-- Build terminal emulator (shell in window - biggest unlock)
 - Build notepad/GUI text editor
 - Build file explorer as windowed app
+- Maybe DOOM?
