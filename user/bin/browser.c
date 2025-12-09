@@ -211,6 +211,7 @@ static int is_redirect(int status) {
 // Parsed content - simple linked list of text blocks
 typedef struct text_block {
     char *text;
+    char *link_url;      // URL if this is a link
     int is_heading;      // h1-h6
     int is_bold;
     int is_link;
@@ -218,6 +219,19 @@ typedef struct text_block {
     int is_paragraph;
     struct text_block *next;
 } text_block_t;
+
+// Clickable link regions for hit testing
+typedef struct {
+    int x, y, w, h;      // Bounding box (relative to content, not scroll)
+    char url[512];
+} link_region_t;
+
+#define MAX_LINK_REGIONS 256
+static link_region_t link_regions[MAX_LINK_REGIONS];
+static int num_link_regions = 0;
+
+// Current link URL being parsed
+static char current_link_url[512] = "";
 
 static text_block_t *blocks_head = NULL;
 static text_block_t *blocks_tail = NULL;
@@ -268,6 +282,16 @@ static void add_block(const char *text, int len, int heading, int bold, int link
     block->is_paragraph = para;
     block->next = NULL;
 
+    // Store link URL if this is a link
+    block->link_url = NULL;
+    if (link && current_link_url[0]) {
+        int url_len = str_len(current_link_url);
+        block->link_url = k->malloc(url_len + 1);
+        if (block->link_url) {
+            str_cpy(block->link_url, current_link_url);
+        }
+    }
+
     if (blocks_tail) {
         blocks_tail->next = block;
         blocks_tail = block;
@@ -281,10 +305,12 @@ static void free_blocks(void) {
     while (b) {
         text_block_t *next = b->next;
         if (b->text) k->free(b->text);
+        if (b->link_url) k->free(b->link_url);
         k->free(b);
         b = next;
     }
     blocks_head = blocks_tail = NULL;
+    num_link_regions = 0;
 }
 
 // Simple HTML parser
@@ -321,8 +347,12 @@ static void parse_html(const char *html, int len) {
             while (p < end && *p != '>' && *p != ' ' && *p != '\t' && *p != '\n') p++;
             int tag_len = p - tag_start;
 
+            // Save position after tag name for attribute parsing
+            const char *attrs_start = p;
+
             // Skip to end of tag
             while (p < end && *p != '>') p++;
+            const char *tag_end = p;
             if (p < end) p++;
 
             // Handle tags
@@ -340,7 +370,43 @@ static void parse_html(const char *html, int len) {
                        (str_ieqn(tag_start, "strong", 6) && tag_len == 6)) {
                 bold = !closing;
             } else if (str_ieqn(tag_start, "a", 1) && tag_len == 1) {
-                link = !closing;
+                if (closing) {
+                    link = 0;
+                    current_link_url[0] = '\0';
+                } else {
+                    link = 1;
+                    // Extract href attribute
+                    current_link_url[0] = '\0';
+                    const char *ap = attrs_start;
+                    while (ap < tag_end) {
+                        // Skip whitespace
+                        while (ap < tag_end && (*ap == ' ' || *ap == '\t' || *ap == '\n')) ap++;
+                        if (ap >= tag_end) break;
+
+                        // Check for href
+                        if (str_ieqn(ap, "href", 4)) {
+                            ap += 4;
+                            while (ap < tag_end && *ap == ' ') ap++;
+                            if (*ap == '=') {
+                                ap++;
+                                while (ap < tag_end && *ap == ' ') ap++;
+                                char quote = 0;
+                                if (*ap == '"' || *ap == '\'') {
+                                    quote = *ap++;
+                                }
+                                const char *href_start = ap;
+                                while (ap < tag_end && *ap != quote && *ap != '>' && *ap != ' ') ap++;
+                                int href_len = ap - href_start;
+                                if (href_len > 0 && href_len < 511) {
+                                    str_ncpy(current_link_url, href_start, href_len);
+                                }
+                                break;
+                            }
+                        }
+                        // Skip to next attribute
+                        while (ap < tag_end && *ap != ' ' && *ap != '\t') ap++;
+                    }
+                }
             } else if (str_ieqn(tag_start, "li", 2) && tag_len == 2) {
                 if (!closing) {
                     add_block("• ", 2, 0, 0, 0, 1, 0);
@@ -416,12 +482,29 @@ static int content_height = 0;
 static int editing_url = 0;
 static char url_input[512] = "";
 static int cursor_pos = 0;
+static int dragging_scrollbar = 0;
+static int drag_start_y = 0;
+static int drag_start_scroll = 0;
+
+// History for back button
+#define MAX_HISTORY 32
+static char history[MAX_HISTORY][512];
+static int history_pos = -1;
+static int history_len = 0;
 
 // Graphics context
 static gfx_ctx_t gfx;
 
+// Scrollbar dimensions (calculated in draw)
+static int scrollbar_y = 0;
+static int scrollbar_h = 0;
+#define SCROLLBAR_W 12
+
 static void draw_browser(void) {
     if (!win_buf) return;
+
+    // Clear link regions
+    num_link_regions = 0;
 
     // Clear
     gfx_fill_rect(&gfx, 0, 0, win_w, win_h, COLOR_WHITE);
@@ -430,17 +513,25 @@ static void draw_browser(void) {
     gfx_fill_rect(&gfx, 0, 0, win_w, ADDR_BAR_HEIGHT, 0x00DDDDDD);
     gfx_draw_rect(&gfx, 0, ADDR_BAR_HEIGHT - 1, win_w, 1, COLOR_BLACK);
 
-    // URL input box
-    gfx_fill_rect(&gfx, 4, 4, win_w - 8, 16, COLOR_WHITE);
-    gfx_draw_rect(&gfx, 4, 4, win_w - 8, 16, COLOR_BLACK);
+    // Back button
+    #define BACK_BTN_W 24
+    uint32_t back_color = (history_pos > 0) ? COLOR_BLACK : 0x00888888;
+    gfx_fill_rect(&gfx, 4, 4, BACK_BTN_W, 16, 0x00EEEEEE);
+    gfx_draw_rect(&gfx, 4, 4, BACK_BTN_W, 16, back_color);
+    gfx_draw_string(&gfx, 8, 4, "<", back_color, 0x00EEEEEE);
+
+    // URL input box (shifted right for back button)
+    int url_x = 4 + BACK_BTN_W + 4;
+    gfx_fill_rect(&gfx, url_x, 4, win_w - url_x - 4, 16, COLOR_WHITE);
+    gfx_draw_rect(&gfx, url_x, 4, win_w - url_x - 4, 16, COLOR_BLACK);
 
     // URL text
     const char *display_url = editing_url ? url_input : current_url;
-    gfx_draw_string(&gfx, 8, 4, display_url, COLOR_BLACK, COLOR_WHITE);
+    gfx_draw_string(&gfx, url_x + 4, 4, display_url, COLOR_BLACK, COLOR_WHITE);
 
     // Cursor when editing
     if (editing_url) {
-        int cursor_x = 8 + cursor_pos * CHAR_W;
+        int cursor_x = url_x + 4 + cursor_pos * CHAR_W;
         gfx_fill_rect(&gfx, cursor_x, 5, 1, 14, COLOR_BLACK);
     }
 
@@ -479,11 +570,23 @@ static void draw_browser(void) {
                 if (block->is_link) fg = 0x000000FF;  // Blue for links
 
                 // Draw character by character for styling
+                int actual_chars = 0;
                 for (int i = 0; i < line_len && text[pos + i] != '\n'; i++) {
                     char c = text[pos + i];
                     int x = MARGIN + i * CHAR_W;
                     if (x + CHAR_W > win_w - MARGIN) break;
                     gfx_draw_char(&gfx, x, y, c, fg, COLOR_WHITE);
+                    actual_chars++;
+                }
+
+                // Register link region for hit testing
+                if (block->is_link && block->link_url && num_link_regions < MAX_LINK_REGIONS && actual_chars > 0) {
+                    link_region_t *lr = &link_regions[num_link_regions++];
+                    lr->x = MARGIN;
+                    lr->y = y;
+                    lr->w = actual_chars * CHAR_W;
+                    lr->h = CHAR_H;
+                    str_ncpy(lr->url, block->link_url, 511);
                 }
 
                 // Underline for headings
@@ -512,11 +615,21 @@ static void draw_browser(void) {
 
     // Scrollbar if needed
     if (content_height > win_h - CONTENT_Y) {
-        int sb_height = (win_h - CONTENT_Y) * (win_h - CONTENT_Y) / content_height;
-        if (sb_height < 20) sb_height = 20;
-        int sb_y = CONTENT_Y + scroll_offset * (win_h - CONTENT_Y - sb_height) /
-                   (content_height - (win_h - CONTENT_Y));
-        gfx_fill_rect(&gfx, win_w - 12, sb_y, 8, sb_height, 0x00888888);
+        int content_area = win_h - CONTENT_Y - 16;  // minus status bar
+        scrollbar_h = content_area * content_area / content_height;
+        if (scrollbar_h < 20) scrollbar_h = 20;
+        int max_scroll = content_height - content_area;
+        if (max_scroll > 0) {
+            scrollbar_y = CONTENT_Y + scroll_offset * (content_area - scrollbar_h) / max_scroll;
+        } else {
+            scrollbar_y = CONTENT_Y;
+        }
+        // Draw scrollbar track
+        gfx_fill_rect(&gfx, win_w - SCROLLBAR_W, CONTENT_Y, SCROLLBAR_W, content_area, 0x00CCCCCC);
+        // Draw scrollbar thumb
+        gfx_fill_rect(&gfx, win_w - SCROLLBAR_W + 2, scrollbar_y, SCROLLBAR_W - 4, scrollbar_h, 0x00666666);
+    } else {
+        scrollbar_h = 0;
     }
 
     // Status bar
@@ -532,7 +645,73 @@ static void draw_browser(void) {
     k->window_invalidate(window_id);
 }
 
+// Resolve a potentially relative URL against the current URL
+static void resolve_url(const char *href, char *out, int max_len) {
+    if (str_eqn(href, "http://", 7) || str_eqn(href, "https://", 8)) {
+        // Absolute URL
+        str_ncpy(out, href, max_len - 1);
+        return;
+    }
+
+    // Parse current URL to get host
+    url_t base;
+    if (parse_url(current_url, &base) < 0) {
+        str_ncpy(out, href, max_len - 1);
+        return;
+    }
+
+    char *p = out;
+    char *end = out + max_len - 1;
+
+    // Build http://host
+    const char *s = "http://";
+    while (*s && p < end) *p++ = *s++;
+    s = base.host;
+    while (*s && p < end) *p++ = *s++;
+
+    if (href[0] == '/') {
+        // Absolute path
+        s = href;
+        while (*s && p < end) *p++ = *s++;
+    } else {
+        // Relative path - append to current directory
+        // Find last / in current path
+        int last_slash = 0;
+        for (int i = 0; base.path[i]; i++) {
+            if (base.path[i] == '/') last_slash = i;
+        }
+        // Copy path up to and including last /
+        for (int i = 0; i <= last_slash && p < end; i++) {
+            *p++ = base.path[i];
+        }
+        // Append relative href
+        s = href;
+        while (*s && p < end) *p++ = *s++;
+    }
+    *p = '\0';
+}
+
+static void navigate_internal(const char *url, int add_to_history);
+
+static void go_back(void) {
+    if (history_pos > 0) {
+        history_pos--;
+        navigate_internal(history[history_pos], 0);
+    }
+}
+
 static void navigate(const char *url) {
+    // Add to history
+    if (history_pos < MAX_HISTORY - 1) {
+        history_pos++;
+        str_ncpy(history[history_pos], url, 511);
+        history_len = history_pos + 1;
+    }
+    navigate_internal(url, 1);
+}
+
+static void navigate_internal(const char *url, int add_to_history) {
+    (void)add_to_history;
     str_cpy(current_url, url);
     str_cpy(url_input, url);
     free_blocks();
@@ -565,6 +744,14 @@ static void navigate(const char *url) {
         }
 
         if (is_redirect(resp.status_code) && resp.location[0] && redirects < 5) {
+            // Don't follow HTTPS redirects - just render whatever content we got
+            if (str_eqn(resp.location, "https://", 8)) {
+                // HTTPS redirect - render the response body as-is
+                if (resp.header_len > 0 && resp.header_len < len) {
+                    parse_html(response + resp.header_len, len - resp.header_len);
+                }
+                break;
+            }
             redirects++;
             if (resp.location[0] == '/') {
                 str_cpy(parsed.path, resp.location);
@@ -574,20 +761,7 @@ static void navigate(const char *url) {
             continue;
         }
 
-        if (resp.status_code != 200) {
-            add_block("Error: HTTP ", 12, 1, 0, 0, 0, 0);
-            char code[16];
-            int ci = 0;
-            int sc = resp.status_code;
-            if (sc >= 100) { code[ci++] = '0' + sc / 100; sc %= 100; }
-            code[ci++] = '0' + sc / 10;
-            code[ci++] = '0' + sc % 10;
-            code[ci] = '\0';
-            add_block(code, ci, 1, 0, 0, 0, 0);
-            break;
-        }
-
-        // Parse HTML
+        // For non-200 responses, still try to render the body (many sites return HTML error pages)
         if (resp.header_len > 0 && resp.header_len < len) {
             parse_html(response + resp.header_len, len - resp.header_len);
         }
@@ -691,7 +865,10 @@ int main(kapi_t *kapi, int argc, char **argv) {
                             draw_browser();
                         } else if (key == 'r' || key == 'R') {
                             // Reload
-                            navigate(current_url);
+                            navigate_internal(current_url, 0);
+                        } else if (key == '\b' || key == 127 || key == 'b' || key == 'B') {
+                            // Back
+                            go_back();
                         } else if (key == KEY_UP || key == 'k') {
                             scroll_offset -= CHAR_H * 3;
                             if (scroll_offset < 0) scroll_offset = 0;
@@ -714,13 +891,82 @@ int main(kapi_t *kapi, int argc, char **argv) {
                     break;
                 }
 
-                case WIN_EVENT_MOUSE_DOWN:
-                    // Click in URL bar starts editing
-                    if (data2 < ADDR_BAR_HEIGHT) {
-                        editing_url = 1;
-                        cursor_pos = str_len(url_input);
-                        draw_browser();
+                case WIN_EVENT_MOUSE_DOWN: {
+                    int mx = data1;
+                    int my = data2;
+
+                    // Click in address bar area
+                    if (my < ADDR_BAR_HEIGHT) {
+                        if (mx >= 4 && mx < 4 + BACK_BTN_W) {
+                            // Back button clicked
+                            go_back();
+                        } else {
+                            // URL bar clicked
+                            editing_url = 1;
+                            cursor_pos = str_len(url_input);
+                            draw_browser();
+                        }
+                    } else if (scrollbar_h > 0 && mx >= win_w - SCROLLBAR_W) {
+                        // Click on scrollbar area
+                        if (my >= scrollbar_y && my < scrollbar_y + scrollbar_h) {
+                            // Start dragging scrollbar
+                            dragging_scrollbar = 1;
+                            drag_start_y = my;
+                            drag_start_scroll = scroll_offset;
+                        } else if (my < scrollbar_y) {
+                            // Click above scrollbar - page up
+                            scroll_offset -= (win_h - CONTENT_Y - 16);
+                            if (scroll_offset < 0) scroll_offset = 0;
+                            draw_browser();
+                        } else {
+                            // Click below scrollbar - page down
+                            int max_scroll = content_height - (win_h - CONTENT_Y - 16);
+                            if (max_scroll < 0) max_scroll = 0;
+                            scroll_offset += (win_h - CONTENT_Y - 16);
+                            if (scroll_offset > max_scroll) scroll_offset = max_scroll;
+                            draw_browser();
+                        }
+                    } else if (!editing_url) {
+                        // Check for link click
+                        for (int i = 0; i < num_link_regions; i++) {
+                            link_region_t *lr = &link_regions[i];
+                            if (mx >= lr->x && mx < lr->x + lr->w &&
+                                my >= lr->y && my < lr->y + lr->h) {
+                                // Clicked on a link!
+                                char resolved[512];
+                                resolve_url(lr->url, resolved, 512);
+                                navigate(resolved);
+                                break;
+                            }
+                        }
                     }
+                    break;
+                }
+
+                case WIN_EVENT_MOUSE_UP:
+                    dragging_scrollbar = 0;
+                    break;
+
+                case WIN_EVENT_MOUSE_MOVE:
+                    if (dragging_scrollbar) {
+                        int dy = data2 - drag_start_y;
+                        int content_area = win_h - CONTENT_Y - 16;
+                        int max_scroll = content_height - content_area;
+                        if (max_scroll > 0 && content_area > scrollbar_h) {
+                            int scroll_range = content_area - scrollbar_h;
+                            scroll_offset = drag_start_scroll + dy * max_scroll / scroll_range;
+                            if (scroll_offset < 0) scroll_offset = 0;
+                            if (scroll_offset > max_scroll) scroll_offset = max_scroll;
+                            draw_browser();
+                        }
+                    }
+                    break;
+
+                case WIN_EVENT_RESIZE:
+                    // Re-fetch buffer with new dimensions
+                    win_buf = k->window_get_buffer(window_id, &win_w, &win_h);
+                    gfx_init(&gfx, win_buf, win_w, win_h, k->font_data);
+                    draw_browser();
                     break;
             }
         }
