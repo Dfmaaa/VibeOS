@@ -14,7 +14,7 @@ VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targe
 - **Human**: Vibes only. Yells "fuck yeah" when things work. Cannot provide technical guidance.
 - **Claude**: Full technical lead. Makes all architecture decisions. Wozniak energy.
 
-## Current State (Last Updated: Session 26)
+## Current State (Last Updated: Session 27)
 - [x] Bootloader (boot/boot.S) - Sets up stack, clears BSS, jumps to kernel
 - [x] Minimal kernel (kernel/kernel.c) - UART output working
 - [x] Linker script (linker.ld) - Memory layout for QEMU virt
@@ -48,7 +48,7 @@ VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targe
 - [x] Menu bar - Apple menu with About/Quit, File menu, Edit menu
 - [x] About dialog - Shows VibeOS version, memory, uptime
 - [x] Power management - WFI-based idle, mouse interrupt-driven, 100Hz UI refresh
-- [x] Virtio Sound - Audio playback via virtio-sound device, WAV file support
+- [x] Virtio Sound - Audio playback via virtio-sound device, WAV and MP3 support
 - [x] Floating point - FPU enabled, context switch saves/restores FP regs, calc uses doubles
 
 ## Architecture Decisions Made
@@ -729,7 +729,38 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
   - Must read bytes individually and assemble (see `read_be32`/`read_be64`)
 - **Achievement**: RAM detected dynamically! No more arbitrary 256MB cap!
 
+### Session 27
+- **MP3 Playback - minimp3 ported!**
+  - Integrated minimp3 single-header decoder into userspace
+  - Created stub headers `user/lib/stdlib.h` and `user/lib/string.h` for freestanding build
+  - Added `memcmp`, `memmove` to string.h stub
+  - `#define MINIMP3_NO_SIMD` to avoid NEON complexity (can enable later for perf)
+- **Refactored sound API:**
+  - Moved WAV parsing from kernel to userspace (kernel shouldn't parse file formats)
+  - Added `sound_play_pcm(data, samples, channels, rate)` to kapi - flexible raw PCM playback
+  - Kernel's `hz_to_rate_index()` converts Hz to virtio rate constants
+- **Mono to stereo conversion:**
+  - virtio-sound doesn't support mono playback
+  - play.c converts mono MP3s to stereo by duplicating samples
+- **Async (non-blocking) playback!**
+  - Added `sound_play_pcm_async()` - starts playback and returns immediately
+  - Added `virtio_sound_pump()` - called from timer interrupt (100Hz) to feed audio chunks
+  - Audio plays in background while user continues using the system
+  - PCM buffer must stay allocated during playback (memory is "orphaned" but OK for CLI)
+- **play command upgraded:**
+  - `play /file.wav` - plays WAV files
+  - `play /file.mp3` - decodes and plays MP3 files
+  - Auto-detects format by extension or magic bytes (RIFF, ID3, MP3 sync)
+  - Shows format info: sample rate, channels, duration, bitrate
+- **New/modified files:**
+  - `vendor/minimp3.h` - Single-header MP3 decoder (already existed)
+  - `user/lib/stdlib.h` - Empty stub for minimp3
+  - `user/lib/string.h` - memcmp, memmove for minimp3
+  - `user/bin/play.c` - WAV/MP3 player with async playback
+  - `kernel/virtio_sound.c` - Added async playback, pump function
+  - `kernel/irq.c` - Timer calls virtio_sound_pump()
+- **Achievement**: MP3 playback with non-blocking audio! Music plays while you work!
+
 **NEXT SESSION TODO:**
-- Port minimp3 decoder (now possible with floats!)
-- Build music player UI
+- Build GUI music player
 - Maybe DOOM?

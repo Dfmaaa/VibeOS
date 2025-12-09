@@ -112,9 +112,11 @@ typedef struct {
     void (*sleep_ms)(uint32_t ms);       // Sleep for at least ms milliseconds
 
     // Sound
-    int (*sound_play_wav)(const void *data, uint32_t size);  // Play WAV from memory
+    int (*sound_play_wav)(const void *data, uint32_t size);  // Play WAV from memory (legacy)
     void (*sound_stop)(void);                                 // Stop playback
     int (*sound_is_playing)(void);                           // Check if playing
+    int (*sound_play_pcm)(const void *data, uint32_t samples, uint8_t channels, uint32_t sample_rate);  // Play raw S16LE PCM (blocking)
+    int (*sound_play_pcm_async)(const void *data, uint32_t samples, uint8_t channels, uint32_t sample_rate);  // Play raw S16LE PCM (non-blocking)
 
 } kapi_t;
 

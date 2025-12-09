@@ -238,6 +238,12 @@ static virtio_snd_pcm_status_t tx_status __attribute__((aligned(16)));
 static int playing = 0;
 static uint32_t playback_position = 0;
 
+// Async playback state
+static const uint8_t *async_pcm_data = NULL;
+static uint32_t async_pcm_bytes = 0;
+static uint32_t async_pcm_offset = 0;
+static int async_playing = 0;
+
 // Memory barriers for device communication
 static inline void mb(void) {
     asm volatile("dsb sy" ::: "memory");
@@ -614,11 +620,36 @@ static int submit_audio(const void *data, uint32_t size) {
     return 0;
 }
 
-int virtio_sound_play(const int16_t *data, uint32_t samples) {
+// Convert sample rate in Hz to virtio rate index
+static int hz_to_rate_index(uint32_t hz) {
+    switch (hz) {
+        case 5512:   return VIRTIO_SND_PCM_RATE_5512;
+        case 8000:   return VIRTIO_SND_PCM_RATE_8000;
+        case 11025:  return VIRTIO_SND_PCM_RATE_11025;
+        case 16000:  return VIRTIO_SND_PCM_RATE_16000;
+        case 22050:  return VIRTIO_SND_PCM_RATE_22050;
+        case 32000:  return VIRTIO_SND_PCM_RATE_32000;
+        case 44100:  return VIRTIO_SND_PCM_RATE_44100;
+        case 48000:  return VIRTIO_SND_PCM_RATE_48000;
+        case 64000:  return VIRTIO_SND_PCM_RATE_64000;
+        case 88200:  return VIRTIO_SND_PCM_RATE_88200;
+        case 96000:  return VIRTIO_SND_PCM_RATE_96000;
+        case 176400: return VIRTIO_SND_PCM_RATE_176400;
+        case 192000: return VIRTIO_SND_PCM_RATE_192000;
+        default:     return -1;  // Unsupported
+    }
+}
+
+int virtio_sound_play_pcm(const int16_t *data, uint32_t samples, uint8_t channels, uint32_t sample_rate) {
     if (!snd_base) return -1;
 
-    // Configure for S16LE stereo 44100Hz
-    if (configure_stream(2, VIRTIO_SND_PCM_FMT_S16, VIRTIO_SND_PCM_RATE_44100) < 0) {
+    int rate_idx = hz_to_rate_index(sample_rate);
+    if (rate_idx < 0) {
+        printf("[SND] Unsupported sample rate: %d\n", sample_rate);
+        return -1;
+    }
+
+    if (configure_stream(channels, VIRTIO_SND_PCM_FMT_S16, rate_idx) < 0) {
         return -1;
     }
 
@@ -634,7 +665,7 @@ int virtio_sound_play(const int16_t *data, uint32_t samples) {
     playback_position = 0;
 
     // Submit audio in chunks
-    uint32_t bytes = samples * 2 * sizeof(int16_t);  // stereo S16
+    uint32_t bytes = samples * channels * sizeof(int16_t);
     uint32_t chunk_size = 4096;  // Match period_bytes
     const uint8_t *ptr = (const uint8_t *)data;
 
@@ -647,13 +678,18 @@ int virtio_sound_play(const int16_t *data, uint32_t samples) {
 
         ptr += to_send;
         bytes -= to_send;
-        playback_position += to_send / (2 * sizeof(int16_t));
+        playback_position += to_send / (channels * sizeof(int16_t));
     }
 
     stop_stream();
     playing = 0;
 
     return 0;
+}
+
+int virtio_sound_play(const int16_t *data, uint32_t samples) {
+    // Legacy function - assume stereo 44100Hz
+    return virtio_sound_play_pcm(data, samples, 2, 44100);
 }
 
 // WAV file header structure
@@ -806,6 +842,8 @@ int virtio_sound_play_wav(const void *data, uint32_t size) {
 void virtio_sound_stop(void) {
     if (!snd_base) return;
     playing = 0;
+    async_playing = 0;
+    async_pcm_data = NULL;
     stop_stream();
 }
 
@@ -819,4 +857,121 @@ void virtio_sound_set_volume(int volume) {
 
 uint32_t virtio_sound_get_position(void) {
     return playback_position;
+}
+
+// Non-blocking audio submit - returns immediately, doesn't wait for completion
+static int submit_audio_async(const void *data, uint32_t size) {
+    static virtio_snd_pcm_xfer_t xfer __attribute__((aligned(16)));
+
+    xfer.stream_id = 0;
+
+    // Descriptor chain: xfer header -> audio data -> status response
+    tx_desc[0].addr = (uint64_t)&xfer;
+    tx_desc[0].len = sizeof(xfer);
+    tx_desc[0].flags = DESC_F_NEXT;
+    tx_desc[0].next = 1;
+
+    tx_desc[1].addr = (uint64_t)data;
+    tx_desc[1].len = size;
+    tx_desc[1].flags = DESC_F_NEXT;
+    tx_desc[1].next = 2;
+
+    tx_desc[2].addr = (uint64_t)&tx_status;
+    tx_desc[2].len = sizeof(tx_status);
+    tx_desc[2].flags = DESC_F_WRITE;
+    tx_desc[2].next = 0;
+
+    mb();
+    tx_avail->ring[tx_avail->idx % QUEUE_SIZE] = 0;
+    mb();
+    tx_avail->idx++;
+    mb();
+
+    // Notify TX queue and return immediately
+    write32(snd_base + VIRTIO_MMIO_QUEUE_NOTIFY/4, VIRTIO_SND_VQ_TX);
+
+    return 0;
+}
+
+// Check if previous async submit completed
+static int async_submit_ready(void) {
+    static uint16_t last_checked_idx = 0;
+
+    mb();
+    if (tx_used->idx != last_checked_idx) {
+        last_checked_idx = tx_used->idx;
+        write32(snd_base + VIRTIO_MMIO_INTERRUPT_ACK/4,
+                read32(snd_base + VIRTIO_MMIO_INTERRUPT_STATUS/4));
+        return 1;
+    }
+    return 0;
+}
+
+// Start async playback - returns immediately
+int virtio_sound_play_pcm_async(const int16_t *data, uint32_t samples, uint8_t channels, uint32_t sample_rate) {
+    if (!snd_base) return -1;
+
+    // Stop any current playback
+    if (async_playing) {
+        virtio_sound_stop();
+    }
+
+    int rate_idx = hz_to_rate_index(sample_rate);
+    if (rate_idx < 0) {
+        printf("[SND] Unsupported sample rate: %d\n", sample_rate);
+        return -1;
+    }
+
+    if (configure_stream(channels, VIRTIO_SND_PCM_FMT_S16, rate_idx) < 0) {
+        return -1;
+    }
+
+    if (prepare_stream() < 0) {
+        return -1;
+    }
+
+    if (start_stream() < 0) {
+        return -1;
+    }
+
+    // Store async state
+    async_pcm_data = (const uint8_t *)data;
+    async_pcm_bytes = samples * channels * sizeof(int16_t);
+    async_pcm_offset = 0;
+    async_playing = 1;
+    playing = 1;
+    playback_position = 0;
+
+    // Submit first chunk
+    virtio_sound_pump();
+
+    return 0;
+}
+
+// Called periodically (e.g., from timer) to feed more audio data
+void virtio_sound_pump(void) {
+    if (!async_playing || !async_pcm_data) return;
+
+    // Check if device is ready for more data
+    if (!async_submit_ready() && async_pcm_offset > 0) {
+        return;  // Previous chunk still processing
+    }
+
+    // Check if we're done
+    if (async_pcm_offset >= async_pcm_bytes) {
+        stop_stream();
+        async_playing = 0;
+        playing = 0;
+        async_pcm_data = NULL;
+        return;
+    }
+
+    // Submit next chunk
+    uint32_t chunk_size = 4096;  // Match period_bytes
+    uint32_t remaining = async_pcm_bytes - async_pcm_offset;
+    uint32_t to_send = (remaining < chunk_size) ? remaining : chunk_size;
+
+    submit_audio_async(async_pcm_data + async_pcm_offset, to_send);
+    async_pcm_offset += to_send;
+    playback_position = async_pcm_offset / 4;  // Approx samples (stereo S16)
 }

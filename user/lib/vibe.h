@@ -10,7 +10,9 @@
 
 typedef unsigned long size_t;
 typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
+typedef signed short int16_t;
 
 // Kernel API structure (must match kernel/kapi.h)
 typedef struct kapi {
@@ -109,9 +111,11 @@ typedef struct kapi {
     void (*sleep_ms)(uint32_t ms);       // Sleep for at least ms milliseconds
 
     // Sound
-    int (*sound_play_wav)(const void *data, uint32_t size);  // Play WAV from memory
+    int (*sound_play_wav)(const void *data, uint32_t size);  // Play WAV from memory (legacy)
     void (*sound_stop)(void);                                 // Stop playback
     int (*sound_is_playing)(void);                           // Check if playing
+    int (*sound_play_pcm)(const void *data, uint32_t samples, uint8_t channels, uint32_t sample_rate);  // Play raw S16LE PCM (blocking)
+    int (*sound_play_pcm_async)(const void *data, uint32_t samples, uint8_t channels, uint32_t sample_rate);  // Play raw S16LE PCM (non-blocking)
 } kapi_t;
 
 // Window event types

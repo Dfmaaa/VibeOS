@@ -107,6 +107,8 @@ install-user: user $(DISK_IMG)
 		cp $(USER_BUILD_DIR)/$$prog.elf /tmp/vibeos_mount/bin/$$prog; \
 		echo "  Installed /bin/$$prog"; \
 	done
+	@if [ -f beep.mp3 ]; then cp beep.mp3 /tmp/vibeos_mount/beep.mp3 && echo "  Installed /beep.mp3"; fi
+	@if [ -f beep.wav ]; then cp beep.wav /tmp/vibeos_mount/beep.wav && echo "  Installed /beep.wav"; fi
 	@dot_clean /tmp/vibeos_mount 2>/dev/null || true
 	@find /tmp/vibeos_mount -name '._*' -delete 2>/dev/null || true
 	@find /tmp/vibeos_mount -name '.DS_Store' -delete 2>/dev/null || true

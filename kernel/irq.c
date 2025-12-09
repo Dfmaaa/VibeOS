@@ -8,6 +8,7 @@
 #include "irq.h"
 #include "printf.h"
 #include "keyboard.h"
+#include "virtio_sound.h"
 
 // QEMU virt machine GIC addresses
 #define GICD_BASE   0x08000000UL  // Distributor
@@ -251,6 +252,9 @@ void sleep_ms(uint32_t ms) {
 // Timer IRQ handler
 static void timer_handler(void) {
     timer_ticks++;
+
+    // Pump audio if playing
+    virtio_sound_pump();
 
     // Reload timer
     asm volatile("msr cntp_tval_el0, %0" :: "r"(timer_interval_ticks));
