@@ -202,6 +202,12 @@ int main(kapi_t *kapi, int argc, char **argv) {
                         running = 0;
                     }
                     break;
+                case WIN_EVENT_RESIZE:
+                    // Re-fetch buffer with new dimensions
+                    win_buffer = api->window_get_buffer(window_id, &win_w, &win_h);
+                    gfx_init(&gfx, win_buffer, win_w, win_h, api->font_data);
+                    draw_all();
+                    break;
             }
         }
 

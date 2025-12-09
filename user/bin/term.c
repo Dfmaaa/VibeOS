@@ -266,6 +266,11 @@ int main(kapi_t *kapi, int argc, char **argv) {
                 char c = (char)data1;
                 input_push(c);
             }
+            if (event_type == WIN_EVENT_RESIZE) {
+                // Re-fetch buffer with new dimensions
+                win_buffer = api->window_get_buffer(window_id, &win_w, &win_h);
+                redraw_screen();
+            }
         }
 
         // Yield to other processes

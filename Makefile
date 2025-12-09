@@ -57,9 +57,9 @@ QEMU = qemu-system-aarch64
 # Graphical mode with virtio-keyboard, virtio-tablet (mouse), virtio-blk disk, and virtio-sound
 # Use force-legacy=false to get modern virtio (version 2) which is easier to program
 # Use secure=on and -bios to boot at EL3 with full GIC access
-QEMU_FLAGS = -M virt,secure=on -cpu cortex-a72 -m 256M -rtc base=utc,clock=host -global virtio-mmio.force-legacy=false -device ramfb -device virtio-blk-device,drive=hd0 -drive file=$(DISK_IMG),if=none,format=raw,id=hd0 -device virtio-keyboard-device -device virtio-tablet-device -device virtio-sound-device,audiodev=audio0 -audiodev coreaudio,id=audio0 -serial stdio -bios $(KERNEL_BIN)
+QEMU_FLAGS = -M virt,secure=on -cpu cortex-a72 -m 512M -rtc base=utc,clock=host -global virtio-mmio.force-legacy=false -device ramfb -device virtio-blk-device,drive=hd0 -drive file=$(DISK_IMG),if=none,format=raw,id=hd0 -device virtio-keyboard-device -device virtio-tablet-device -device virtio-sound-device,audiodev=audio0 -audiodev coreaudio,id=audio0 -serial stdio -bios $(KERNEL_BIN)
 # No-graphics mode (terminal only) - no keyboard in nographic mode
-QEMU_FLAGS_NOGRAPHIC = -M virt,secure=on -cpu cortex-a72 -m 256M -rtc base=utc,clock=host -global virtio-mmio.force-legacy=false -device virtio-blk-device,drive=hd0 -drive file=$(DISK_IMG),if=none,format=raw,id=hd0 -device virtio-sound-device,audiodev=audio0 -audiodev coreaudio,id=audio0 -nographic -bios $(KERNEL_BIN)
+QEMU_FLAGS_NOGRAPHIC = -M virt,secure=on -cpu cortex-a72 -m 512M -rtc base=utc,clock=host -global virtio-mmio.force-legacy=false -device virtio-blk-device,drive=hd0 -drive file=$(DISK_IMG),if=none,format=raw,id=hd0 -device virtio-sound-device,audiodev=audio0 -audiodev coreaudio,id=audio0 -nographic -bios $(KERNEL_BIN)
 
 .PHONY: all clean run run-nographic debug user disk install-user
 

@@ -132,6 +132,7 @@ typedef struct {
 #define WIN_EVENT_CLOSE      5
 #define WIN_EVENT_FOCUS      6
 #define WIN_EVENT_UNFOCUS    7
+#define WIN_EVENT_RESIZE     8
 
 // Global kernel API instance
 extern kapi_t kapi;

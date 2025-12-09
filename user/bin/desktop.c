@@ -12,9 +12,9 @@
 #include "../lib/gfx.h"
 #include "../lib/icons.h"
 
-// Screen dimensions
-#define SCREEN_WIDTH  800
-#define SCREEN_HEIGHT 600
+// Screen dimensions (set dynamically from kapi)
+static int SCREEN_WIDTH;
+static int SCREEN_HEIGHT;
 
 // UI dimensions
 #define MENU_BAR_HEIGHT 20
@@ -89,6 +89,11 @@ static uint8_t mouse_prev_buttons;
 // Dragging state
 static int dragging_window = -1;
 static int drag_offset_x, drag_offset_y;
+
+// Resizing state
+static int resizing_window = -1;
+static int resize_start_w, resize_start_h;
+static int resize_start_mx, resize_start_my;
 
 // Desktop running flag
 static int running = 1;
@@ -691,6 +696,18 @@ static void draw_window(int wid) {
             }
         }
     }
+
+    // Resize handle (bottom-right corner) - System 7 style diagonal lines
+    int rh_x = w->x + w->w - 15;
+    int rh_y = w->y + w->h - 15;
+    // Draw 3 diagonal lines
+    for (int i = 0; i < 3; i++) {
+        int offset = i * 4;
+        // Each line is 2 pixels thick for visibility
+        for (int d = 0; d < 10 - offset; d++) {
+            bb_put_pixel(rh_x + offset + d + 4, rh_y + d + 4, COLOR_BLACK);
+        }
+    }
 }
 
 // ============ Cursor ============
@@ -1066,6 +1083,20 @@ static void handle_mouse_click(int x, int y, uint8_t buttons) {
             drag_offset_x = x - w->x;
             drag_offset_y = y - w->y;
         } else if (y >= w->y + TITLE_BAR_HEIGHT) {
+            // Check for resize handle (bottom-right corner, 15x15 area)
+            int rh_x = w->x + w->w - 15;
+            int rh_y = w->y + w->h - 15;
+            if ((buttons & MOUSE_BTN_LEFT) &&
+                x >= rh_x && x < w->x + w->w &&
+                y >= rh_y && y < w->y + w->h) {
+                // Start resizing
+                resizing_window = wid;
+                resize_start_w = w->w;
+                resize_start_h = w->h;
+                resize_start_mx = x;
+                resize_start_my = y;
+                return;
+            }
             // Click in content area - send event to app with button info
             int local_x = x - w->x - 1;
             int local_y = y - w->y - TITLE_BAR_HEIGHT - 1;
@@ -1076,6 +1107,28 @@ static void handle_mouse_click(int x, int y, uint8_t buttons) {
 
 static void handle_mouse_release(int x, int y) {
     dragging_window = -1;
+
+    // Handle resize completion
+    if (resizing_window >= 0) {
+        window_t *w = &windows[resizing_window];
+
+        // Free old buffer and allocate new one
+        api->free(w->buffer);
+        int content_h = w->h - TITLE_BAR_HEIGHT;
+        if (content_h < 1) content_h = 1;
+        w->buffer = api->malloc(w->w * content_h * sizeof(uint32_t));
+
+        // Clear new buffer to white
+        for (int i = 0; i < w->w * content_h; i++) {
+            w->buffer[i] = COLOR_WHITE;
+        }
+
+        // Send resize event to app (data1=new width, data2=new height)
+        push_event(resizing_window, WIN_EVENT_RESIZE, w->w, w->h, 0);
+
+        resizing_window = -1;
+        return;
+    }
 
     int wid = window_at_point(x, y);
     if (wid >= 0) {
@@ -1100,6 +1153,26 @@ static void handle_mouse_move(int x, int y) {
         if (w->x + w->w > SCREEN_WIDTH) w->x = SCREEN_WIDTH - w->w;
         if (w->y + w->h > SCREEN_HEIGHT - DOCK_HEIGHT)
             w->y = SCREEN_HEIGHT - DOCK_HEIGHT - w->h;
+    }
+
+    if (resizing_window >= 0) {
+        window_t *w = &windows[resizing_window];
+
+        // Calculate new size based on mouse delta
+        int new_w = resize_start_w + (x - resize_start_mx);
+        int new_h = resize_start_h + (y - resize_start_my);
+
+        // Enforce minimum size
+        if (new_w < 100) new_w = 100;
+        if (new_h < 60) new_h = 60;
+
+        // Enforce maximum (screen bounds)
+        if (w->x + new_w > SCREEN_WIDTH) new_w = SCREEN_WIDTH - w->x;
+        if (w->y + new_h > SCREEN_HEIGHT - DOCK_HEIGHT)
+            new_h = SCREEN_HEIGHT - DOCK_HEIGHT - w->y;
+
+        w->w = new_w;
+        w->h = new_h;
     }
 }
 
@@ -1139,6 +1212,10 @@ int main(kapi_t *kapi, int argc, char **argv) {
     (void)argv;
 
     api = kapi;
+
+    // Get screen dimensions from kapi
+    SCREEN_WIDTH = api->fb_width;
+    SCREEN_HEIGHT = api->fb_height;
 
     // Allocate backbuffer
     backbuffer = api->malloc(SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));

@@ -817,6 +817,16 @@ int main(kapi_t *kapi, int argc, char **argv) {
                     handle_key(data1);
                     draw_all();
                     break;
+
+                case WIN_EVENT_RESIZE:
+                    // Re-fetch buffer with new dimensions
+                    win_buffer = api->window_get_buffer(window_id, &win_w, &win_h);
+                    gfx_init(&gfx, win_buffer, win_w, win_h, api->font_data);
+                    // Recalculate visible area
+                    visible_cols = (win_w - CONTENT_X * 2) / CHAR_W;
+                    visible_rows = (win_h - CONTENT_Y * 2 - CHAR_H - 4) / CHAR_H;
+                    draw_all();
+                    break;
             }
         }
 

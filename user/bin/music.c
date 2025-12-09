@@ -68,6 +68,10 @@ static uint32_t pause_elapsed_ms = 0;  // Elapsed time when paused
 static int album_scroll = 0;
 static int track_scroll = 0;
 
+// Error message (shown briefly)
+static char error_msg[64] = {0};
+static uint32_t error_tick = 0;
+
 // Loading state machine
 typedef enum {
     LOAD_STATE_IDLE = 0,
@@ -121,6 +125,17 @@ static void draw_text_clip(int x, int y, const char *s, uint32_t fg, uint32_t bg
         drawn += 8;
         s++;
     }
+}
+
+// Show error message for 3 seconds
+static void show_error(const char *msg) {
+    int i = 0;
+    while (msg[i] && i < 63) {
+        error_msg[i] = msg[i];
+        i++;
+    }
+    error_msg[i] = 0;
+    error_tick = api->get_uptime_ticks();
 }
 
 // Draw 3D button (classic Mac style)
@@ -196,6 +211,16 @@ static void draw_track_list(void) {
 
     // Background
     fill_rect(x, 0, w, h, WHITE);
+
+    // Show error message for 3 seconds
+    if (error_msg[0] && api->get_uptime_ticks() - error_tick < 300) {
+        int err_len = strlen(error_msg) * 8;
+        int err_x = x + (w - err_len) / 2;
+        fill_rect(err_x - 4, h - 30, err_len + 8, 20, BLACK);
+        draw_string(err_x, h - 28, error_msg, WHITE, BLACK);
+    } else {
+        error_msg[0] = 0;  // Clear expired error
+    }
 
     if (selected_album < 0 || selected_album >= album_count) {
         // No album selected
@@ -517,6 +542,7 @@ static int play_track(int track_idx) {
     if (!file) {
         is_loading = 0;
         load_state = LOAD_STATE_IDLE;
+        show_error("Cannot open file");
         return -1;
     }
 
@@ -524,6 +550,7 @@ static int play_track(int track_idx) {
     if (size <= 0) {
         is_loading = 0;
         load_state = LOAD_STATE_IDLE;
+        show_error("Empty file");
         return -1;
     }
 
@@ -531,6 +558,7 @@ static int play_track(int track_idx) {
     if (!mp3_data) {
         is_loading = 0;
         load_state = LOAD_STATE_IDLE;
+        show_error("Out of memory (file too large)");
         return -1;
     }
 
@@ -555,6 +583,7 @@ static int play_track(int track_idx) {
         api->free(mp3_data);
         is_loading = 0;
         load_state = LOAD_STATE_IDLE;
+        show_error("Out of memory (song too long)");
         return -1;
     }
 
@@ -600,6 +629,7 @@ static int play_track(int track_idx) {
         pcm_buffer = NULL;
         is_loading = 0;
         load_state = LOAD_STATE_IDLE;
+        show_error("Invalid MP3 format");
         return -1;
     }
 
@@ -827,6 +857,16 @@ int main(kapi_t *k, int argc, char **argv) {
                     } else if (key == 'q' || key == 'Q') {
                         running = 0;
                     }
+                    break;
+                }
+
+                case WIN_EVENT_RESIZE: {
+                    // Re-fetch buffer with new dimensions
+                    int bw, bh;
+                    win_buffer = api->window_get_buffer(window_id, &bw, &bh);
+                    win_w = bw;
+                    win_h = bh;
+                    gfx_init(&gfx, win_buffer, bw, bh, api->font_data);
                     break;
                 }
             }
