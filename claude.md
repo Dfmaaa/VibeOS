@@ -801,6 +801,31 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
   - `user/lib/vibe.h` - Added uint64_t, pause/resume kapi functions
 - **Achievement**: Full-featured music player! Pause, resume, progress tracking all work!
 
+### Session 29
+- **Improved Terminal Emulator (`/bin/term`):**
+  - 500-line scrollback buffer (ring buffer implementation)
+  - Mouse drag scrolling - click and drag to scroll through history
+  - Scroll indicator `[N]` in top-right when scrolled back
+  - Auto-scroll to bottom on keystroke
+  - Input buffer now uses `int` to preserve special keys (0x100+)
+  - Form feed (\f) support for clear screen
+- **Improved Shell (`/bin/vibesh`) with readline-like editing:**
+  - Command history (50 commands) with Up/Down arrow navigation
+  - `!!` to repeat last command
+  - Ctrl+C - clear current line (prints ^C)
+  - Ctrl+U - clear line before cursor
+  - Ctrl+D - exit shell (EOF) when line empty
+  - Ctrl+L - clear screen
+  - Ctrl+R - reverse incremental search through history
+  - Tab completion for commands (/bin) and file paths
+  - `clear` builtin command
+  - Left/Right arrows for cursor movement
+  - Home/End to jump to start/end of line
+  - Delete key support
+- **Added special key constants to vibe.h:**
+  - KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_HOME, KEY_END, KEY_DELETE
+- **Achievement**: Proper terminal with scrollback and readline-style shell!
+
 **NEXT SESSION TODO:**
 - Make music loading non-blocking (show spinner, decode in chunks)
 - Maybe DOOM?

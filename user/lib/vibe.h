@@ -138,6 +138,15 @@ typedef struct kapi {
 #define MOUSE_BTN_RIGHT  0x02
 #define MOUSE_BTN_MIDDLE 0x04
 
+// Special key codes (must match kernel/keyboard.c)
+#define KEY_UP     0x100
+#define KEY_DOWN   0x101
+#define KEY_LEFT   0x102
+#define KEY_RIGHT  0x103
+#define KEY_HOME   0x104
+#define KEY_END    0x105
+#define KEY_DELETE 0x106
+
 // Colors (must match kernel fb.h - these are RGB values)
 #define COLOR_BLACK   0x00000000
 #define COLOR_WHITE   0x00FFFFFF

@@ -490,7 +490,7 @@ int main(kapi_t *kapi, int argc, char **argv) {
     init_game();
 
     int drop_counter = 0;
-    int drop_speed = 30;  // Ticks between drops (at 60fps, 30 ticks = 500ms)
+    int drop_speed = 18;  // Ticks between drops (at 60fps, 18 ticks = ~300ms)
 
     while (1) {
         if (process_input() < 0) {
@@ -502,10 +502,10 @@ int main(kapi_t *kapi, int argc, char **argv) {
             drop_counter = 0;
             update_game();
 
-            // Speed curve: starts at 30, decreases by 2 per level
-            // Level 1: 30 ticks (500ms), Level 10: 12 ticks (200ms)
-            drop_speed = 32 - level * 2;
-            if (drop_speed < 6) drop_speed = 6;
+            // Speed curve: starts at 18, decreases by 2 per level
+            // Level 1: 18 ticks (~300ms), Level 10: 4 ticks (~67ms)
+            drop_speed = 20 - level * 2;
+            if (drop_speed < 4) drop_speed = 4;
         }
 
         if (game_over) {
