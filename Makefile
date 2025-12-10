@@ -24,7 +24,9 @@ KERNEL_C_SRCS = $(wildcard $(KERNEL_DIR)/*.c)
 KERNEL_S_SRCS = $(wildcard $(KERNEL_DIR)/*.S)
 
 # Userspace programs to build and install to disk
-USER_PROGS = snake tetris desktop calc vibesh echo ls cat pwd mkdir touch rm term uptime sysmon textedit files date play music ping fetch browser
+# Note: browser is handled specially (multi-file build from user/bin/browser/)
+USER_PROGS = snake tetris desktop calc vibesh echo ls cat pwd mkdir touch rm term uptime sysmon textedit files date play music ping fetch
+USER_PROGS_MULTIFILE = browser
 
 # Object files
 BOOT_OBJ = $(BUILD_DIR)/boot.o
@@ -34,6 +36,7 @@ KERNEL_OBJS = $(KERNEL_C_OBJS) $(KERNEL_S_OBJS)
 
 # Userspace ELF files (installed to disk, NOT embedded in kernel)
 USER_ELFS = $(patsubst %,$(USER_BUILD_DIR)/%.elf,$(USER_PROGS))
+USER_ELFS_MULTIFILE = $(patsubst %,$(USER_BUILD_DIR)/%.elf,$(USER_PROGS_MULTIFILE))
 
 # Output files
 KERNEL_ELF = $(BUILD_DIR)/vibeos.elf
@@ -101,19 +104,27 @@ $(USER_BUILD_DIR)/crt0.o: $(USER_DIR)/lib/crt0.S | $(USER_BUILD_DIR)
 $(USER_BUILD_DIR)/%.prog.o: $(USER_DIR)/bin/%.c | $(USER_BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-# Link userspace program
+# Link userspace program (single-file)
 $(USER_BUILD_DIR)/%.elf: $(USER_BUILD_DIR)/crt0.o $(USER_BUILD_DIR)/%.prog.o
 	$(LD) $(USER_LDFLAGS) $^ -o $@
 	@echo "Built userspace program: $@"
 
+# Browser - multi-file build
+$(USER_BUILD_DIR)/browser.elf: $(USER_BUILD_DIR)/crt0.o $(USER_BUILD_DIR)/browser_main.o
+	$(LD) $(USER_LDFLAGS) $^ -o $@
+	@echo "Built userspace program: $@ (multi-file)"
+
+$(USER_BUILD_DIR)/browser_main.o: $(USER_DIR)/bin/browser/main.c $(USER_DIR)/bin/browser/*.h | $(USER_BUILD_DIR)
+	$(CC) $(USER_CFLAGS) -I$(USER_DIR)/bin/browser -c $< -o $@
+
 # Build all userspace programs
-user: $(USER_ELFS)
+user: $(USER_ELFS) $(USER_ELFS_MULTIFILE)
 
 # Install userspace programs to disk image
 install-user: user $(DISK_IMG)
 	@echo "Installing userspace programs to disk..."
 	@hdiutil attach $(DISK_IMG) -nobrowse -mountpoint /tmp/vibeos_mount > /dev/null
-	@for prog in $(USER_PROGS); do \
+	@for prog in $(USER_PROGS) $(USER_PROGS_MULTIFILE); do \
 		cp $(USER_BUILD_DIR)/$$prog.elf /tmp/vibeos_mount/bin/$$prog; \
 		echo "  Installed /bin/$$prog"; \
 	done
