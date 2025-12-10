@@ -132,6 +132,12 @@ typedef struct kapi {
     // RAM info
     size_t (*get_ram_total)(void);                           // Total RAM in bytes
 
+    // Debug memory info
+    uint64_t (*get_heap_start)(void);                        // Heap start address
+    uint64_t (*get_heap_end)(void);                          // Heap end address
+    uint64_t (*get_stack_ptr)(void);                         // Current stack pointer
+    int (*get_alloc_count)(void);                            // Number of allocations
+
     // Networking
     int (*net_ping)(uint32_t ip, uint16_t seq, uint32_t timeout_ms);  // Ping an IP, returns 0 on success
     void (*net_poll)(void);                                           // Process incoming packets

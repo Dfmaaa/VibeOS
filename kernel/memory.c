@@ -200,3 +200,29 @@ size_t memory_free(void) {
     }
     return free_mem;
 }
+
+uint64_t memory_heap_start(void) {
+    return heap_start;
+}
+
+uint64_t memory_heap_end(void) {
+    return heap_end;
+}
+
+uint64_t memory_get_sp(void) {
+    uint64_t sp;
+    __asm__ volatile("mov %0, sp" : "=r"(sp));
+    return sp;
+}
+
+int memory_alloc_count(void) {
+    int count = 0;
+    block_header_t *current = free_list;
+    while (current != NULL) {
+        if (!current->is_free) {
+            count++;
+        }
+        current = current->next;
+    }
+    return count;
+}

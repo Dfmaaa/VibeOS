@@ -55,13 +55,17 @@ static int font_data_size = 0;
 static stbtt_fontinfo font_info;
 static int ttf_ready = 0;
 
-// Caches for different sizes
-#define NUM_SIZE_CACHES 4
+// Caches for different sizes (must cover all sizes used by browser)
+#define NUM_SIZE_CACHES 8
 static size_cache_t size_caches[NUM_SIZE_CACHES];
 static int size_cache_sizes[NUM_SIZE_CACHES] = {
     FONT_SIZE_SMALL,   // 12
+    14,                // browser small
     FONT_SIZE_NORMAL,  // 16
+    18,                // browser h4
+    20,                // browser h3
     FONT_SIZE_LARGE,   // 24
+    28,                // browser h1
     FONT_SIZE_XLARGE   // 32
 };
 
@@ -70,13 +74,24 @@ static uint8_t *temp_bitmap = NULL;
 static int temp_bitmap_size = 0;
 
 static size_cache_t *get_size_cache(int size) {
+    // First try exact match
     for (int i = 0; i < NUM_SIZE_CACHES; i++) {
         if (size_caches[i].size == size) {
             return &size_caches[i];
         }
     }
-    // Default to normal size
-    return &size_caches[1];
+    // Find closest size
+    int best = 0;
+    int best_diff = 1000;
+    for (int i = 0; i < NUM_SIZE_CACHES; i++) {
+        int diff = size_caches[i].size - size;
+        if (diff < 0) diff = -diff;
+        if (diff < best_diff) {
+            best_diff = diff;
+            best = i;
+        }
+    }
+    return &size_caches[best];
 }
 
 int ttf_init(void) {
@@ -142,41 +157,50 @@ int ttf_is_ready(void) {
 }
 
 // Apply faux bold (draw shifted copy)
-static void apply_bold(uint8_t *bitmap, int w, int h) {
+// stride = row stride in bytes, content_w = actual content width
+static void apply_bold(uint8_t *bitmap, int stride, int content_w, int h) {
     // Add pixels shifted right by 1
     for (int y = 0; y < h; y++) {
-        for (int x = w - 1; x > 0; x--) {
-            int idx = y * w + x;
-            int val = bitmap[idx] + bitmap[idx - 1];
+        // Work right to left so we don't overwrite source pixels
+        for (int x = content_w; x > 0; x--) {
+            int idx = y * stride + x;
+            int src_idx = y * stride + x - 1;
+            int val = bitmap[idx] + bitmap[src_idx];
             bitmap[idx] = (val > 255) ? 255 : val;
         }
     }
 }
 
 // Apply faux italic (shear transform)
-static void apply_italic(uint8_t *bitmap, int w, int h, int *new_w) {
+// stride = row stride in bytes, content_w = actual content width to shear
+static void apply_italic(uint8_t *bitmap, int stride, int content_w, int h, int *new_w) {
     if (!temp_bitmap) return;
 
     // Shear amount: ~0.2 (about 12 degrees)
     float shear = 0.2f;
-    int extra_w = (int)(h * shear) + 1;
-    int out_w = w + extra_w;
+    int max_shift = (int)((h - 1) * shear) + 1;
+    int out_w = content_w + max_shift;
 
-    if (out_w * h > temp_bitmap_size) return;
+    // Make sure output fits in allocated space
+    if (out_w > stride) out_w = stride;
+    if (stride * h > temp_bitmap_size) return;
 
     // Clear temp
-    memset(temp_bitmap, 0, out_w * h);
+    memset(temp_bitmap, 0, stride * h);
 
     // Shear: each row shifts right based on distance from bottom
     for (int y = 0; y < h; y++) {
         int shift = (int)((h - 1 - y) * shear);
-        for (int x = 0; x < w; x++) {
-            temp_bitmap[y * out_w + x + shift] = bitmap[y * w + x];
+        for (int x = 0; x < content_w; x++) {
+            int dst_x = x + shift;
+            if (dst_x < stride) {
+                temp_bitmap[y * stride + dst_x] = bitmap[y * stride + x];
+            }
         }
     }
 
-    // Copy back (caller's bitmap must have space)
-    memcpy(bitmap, temp_bitmap, out_w * h);
+    // Copy back (same size as input)
+    memcpy(bitmap, temp_bitmap, stride * h);
     *new_w = out_w;
 }
 
@@ -196,7 +220,13 @@ ttf_glyph_t *ttf_get_glyph(int codepoint, int size, int style) {
 
     // Need to render
     if (cache->count >= MAX_CACHED_GLYPHS) {
-        // Cache full, evict oldest (simple strategy: just wrap)
+        // Cache full, evict all entries and free their bitmaps
+        for (int i = 0; i < MAX_CACHED_GLYPHS; i++) {
+            if (cache->entries[i].glyph.bitmap) {
+                free(cache->entries[i].glyph.bitmap);
+                cache->entries[i].glyph.bitmap = NULL;
+            }
+        }
         cache->count = 0;
     }
 
@@ -277,14 +307,17 @@ ttf_glyph_t *ttf_get_glyph(int codepoint, int size, int style) {
     entry->glyph.advance = (int)(advance * cache->scale);
 
     // Apply styling
+    int content_w = w;  // Track actual content width as we apply styles
+
     if (style & FONT_STYLE_BOLD) {
-        apply_bold(entry->glyph.bitmap, alloc_w, h);
+        apply_bold(entry->glyph.bitmap, alloc_w, content_w, h);
+        content_w += 1;  // Bold adds 1 pixel width
         entry->glyph.advance += 1;
     }
 
     if (style & FONT_STYLE_ITALIC) {
         int new_w = alloc_w;
-        apply_italic(entry->glyph.bitmap, alloc_w, h, &new_w);
+        apply_italic(entry->glyph.bitmap, alloc_w, content_w, h, &new_w);
         entry->glyph.width = new_w;
     }
 

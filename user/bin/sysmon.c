@@ -15,8 +15,8 @@ static int win_w, win_h;
 static gfx_ctx_t gfx;
 
 // Window content dimensions
-#define CONTENT_W 280
-#define CONTENT_H 450
+#define CONTENT_W 320
+#define CONTENT_H 520
 
 // Process states (must match kernel)
 #define PROC_STATE_FREE    0
@@ -52,6 +52,16 @@ static void format_num(char *buf, unsigned long n) {
         buf[j++] = tmp[--i];
     }
     buf[j] = '\0';
+}
+
+static void format_hex(char *buf, uint64_t n) {
+    const char *hex = "0123456789ABCDEF";
+    buf[0] = '0';
+    buf[1] = 'x';
+    for (int i = 0; i < 8; i++) {
+        buf[2 + i] = hex[(n >> (28 - i * 4)) & 0xF];
+    }
+    buf[10] = '\0';
 }
 
 static void format_size_mb(char *buf, unsigned long bytes) {
@@ -253,6 +263,39 @@ static void draw_all(void) {
     buf[blen] = '%';
     buf[blen+1] = '\0';
     buf_draw_string(CONTENT_W - 32, y, buf, COLOR_BLACK, COLOR_WHITE);
+    y += 20;
+
+    // ============ Debug Memory Section ============
+    draw_section_header(y + 4, "Memory Debug");
+    y += 16;
+
+    // Heap bounds
+    uint64_t heap_start = api->get_heap_start();
+    uint64_t heap_end = api->get_heap_end();
+    format_hex(buf, heap_start);
+    draw_label_value(y, "Heap Start:", buf);
+    y += 16;
+
+    format_hex(buf, heap_end);
+    draw_label_value(y, "Heap End:", buf);
+    y += 16;
+
+    // Heap size
+    uint64_t heap_size = heap_end - heap_start;
+    format_size_mb(buf, heap_size);
+    draw_label_value(y, "Heap Size:", buf);
+    y += 16;
+
+    // Stack pointer
+    uint64_t sp = api->get_stack_ptr();
+    format_hex(buf, sp);
+    draw_label_value(y, "Stack Ptr:", buf);
+    y += 16;
+
+    // Allocation count
+    int alloc_count = api->get_alloc_count();
+    format_num(buf, alloc_count);
+    draw_label_value(y, "Allocs:", buf);
     y += 20;
 
     // ============ Disk Section ============

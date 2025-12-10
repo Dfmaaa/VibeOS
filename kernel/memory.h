@@ -29,4 +29,14 @@ void *realloc(void *ptr, size_t size);
 size_t memory_used(void);
 size_t memory_free(void);
 
+// Heap bounds (for debugging)
+uint64_t memory_heap_start(void);
+uint64_t memory_heap_end(void);
+
+// Stack info (returns current SP)
+uint64_t memory_get_sp(void);
+
+// Count allocations (for debugging)
+int memory_alloc_count(void);
+
 #endif

@@ -287,6 +287,12 @@ void kapi_init(void) {
     // RAM info
     kapi.get_ram_total = kapi_get_ram_total;
 
+    // Debug memory info
+    kapi.get_heap_start = memory_heap_start;
+    kapi.get_heap_end = memory_heap_end;
+    kapi.get_stack_ptr = memory_get_sp;
+    kapi.get_alloc_count = memory_alloc_count;
+
     // Networking
     kapi.net_ping = net_ping;
     kapi.net_poll = net_poll;

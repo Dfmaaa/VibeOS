@@ -737,3 +737,35 @@
     - Process list
     - Sound playing status
   - MP3 loading improvements: Single-pass decode with loading state indicators
+
+### Session 36
+- **Fixed critical memory corruption bug in TTF rendering:**
+  - Browser was consuming ALL available RAM (tested 512MB and 8GB - both exhausted!)
+  - sysmon showed only 73 allocations, ~11MB heap "used", but 0MB "free" - contradiction
+  - Root cause identified with help from Gemini: **buffer overflow in `apply_italic()`**
+  - Bug: `apply_italic` was calculating `extra_w` again on top of already-expanded buffer
+    - Called with `alloc_w` (already includes italic space)
+    - Internally calculated `out_w = w + extra_w` (doubling the expansion)
+    - `memcpy(bitmap, temp_bitmap, out_w * h)` wrote past buffer end
+  - This corrupted heap metadata, breaking the free list traversal
+  - Fixed by passing original glyph width separately from stride
+- **Enhanced sysmon with memory debugging:**
+  - Added `get_heap_start()`, `get_heap_end()`, `get_stack_ptr()`, `get_alloc_count()` to kapi
+  - sysmon now shows: heap bounds, heap size, stack pointer, allocation count
+  - Helped diagnose the memory corruption (heap looked full because free list was broken)
+- **Cache eviction fix:**
+  - TTF glyph cache eviction now frees bitmap allocations before resetting
+  - Previously leaked all 128 bitmaps on each cache wrap
+- **Expanded font size caches:**
+  - Added sizes 14, 18, 20, 28 to match browser heading sizes
+  - Prevents cache misses for common sizes
+- **Known issue:** Italic rendering is still broken (garbled output)
+  - The buffer overflow is fixed, but the shear logic needs more work
+  - Bold works fine, italic produces garbage
+- **Files changed:**
+  - `kernel/ttf.c` - Fixed apply_italic buffer overflow, cache eviction
+  - `kernel/memory.c` - Added debug functions
+  - `kernel/memory.h` - Declared debug functions
+  - `kernel/kapi.c`, `kernel/kapi.h` - Added memory debug to kapi
+  - `user/lib/vibe.h` - Added memory debug functions
+  - `user/bin/sysmon.c` - Added Memory Debug section

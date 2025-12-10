@@ -249,6 +249,7 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
 - **Kernel stack vs heap collision**: Heap runs from `_bss_end + 0x10000` to `0x41000000`. If kernel stack is inside this range, large allocations (like framebuffer backbuffer) will overwrite the stack. Symptom: local variables corrupted with data like `0x00ffffff` (COLOR_WHITE). Stack was at 0x40100000 (inside heap!). Moved to 0x4F000000 (well above heap and program area).
 - **DTB at RAM start**: QEMU places the Device Tree Blob at 0x40000000 (start of RAM). Linker script must start .data/.bss after DTB area (we use 0x40200000, leaving 2MB for DTB).
 - **DTB unaligned access**: Reading 32/64-bit values from DTB can cause alignment faults on ARM. Read bytes individually and assemble manually (see `read_be32`/`read_be64` in dtb.c).
+- **TTF italic buffer overflow**: When applying styles to glyphs, track original glyph width vs allocated stride separately. If a function calculates "extra space needed" and you pass an already-expanded buffer, it will double the expansion and overflow. The `apply_italic` bug wrote past buffer end, corrupting heap metadata.
 
 ## Session Log
 For detailed session-by-session development history, see [session_log.md](session_log.md).
