@@ -19,7 +19,7 @@ VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targe
 - **Human**: Vibes only. Yells "fuck yeah" when things work. Cannot provide technical guidance.
 - **Claude**: Full technical lead. Makes all architecture decisions. Wozniak energy.
 
-## Current State (Last Updated: Session 33)
+## Current State (Last Updated: Session 34)
 - [x] Bootloader (boot/boot.S) - Sets up stack, clears BSS, jumps to kernel
 - [x] Minimal kernel (kernel/kernel.c) - UART output working
 - [x] Linker script (linker.ld) - Memory layout for QEMU virt
@@ -148,7 +148,8 @@ Phase 4: GUI (IN PROGRESS)
 - user/lib/gfx.h - Shared graphics primitives (header-only)
 - user/lib/icons.h - Dock icons and VibeOS logo bitmaps
 - user/lib/crt0.S - C runtime startup
-- user/bin/*.c - Program sources
+- user/bin/*.c - Single-file program sources
+- user/bin/browser/ - Multi-file browser (str.h, url.h, http.h, html.h, main.c)
 - user/linker.ld - Program linker script (PIE, base at 0x0)
 
 ### Build & Run
@@ -946,6 +947,22 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
   - `user/bin/browser.c` (~730 lines) - Full GUI web browser
   - `user/lib/icons.h` - Added browser (globe) icon
 - **Achievement**: VibeOS has a web browser! Can browse HTTP sites with HTML rendering!
+
+### Session 34
+- **Refactored browser into multi-file structure:**
+  - Split 1400-line `user/bin/browser.c` into modular components
+  - New directory: `user/bin/browser/`
+  - `str.h` - String helper functions (str_len, str_cpy, str_ncpy, str_eqn, str_ieqn, parse_int)
+  - `url.h` - URL parsing (url_t struct, parse_url, resolve_url)
+  - `http.h` - HTTP client (http_response_t, http_get, parse_headers, is_redirect)
+  - `html.h` - HTML parser (text_block_t, style_state_t, parse_html, entity decoding)
+  - `main.c` - Browser UI, rendering, and event loop
+- **Updated Makefile for multi-file userspace builds:**
+  - Added `USER_PROGS_MULTIFILE` list for programs built from directories
+  - Browser compiles from `user/bin/browser/main.c` with all headers
+  - Pattern supports future multi-file apps
+- **Architecture note:** Used header-only libraries (static inline) for simplicity - no separate .c files needed
+- **Achievement**: Browser code now organized and maintainable!
 
 **NEXT SESSION TODO:**
 - HTTPS/TLS? (complex, needs crypto - BearSSL or mbedTLS port)
