@@ -769,3 +769,57 @@
   - `kernel/kapi.c`, `kernel/kapi.h` - Added memory debug to kapi
   - `user/lib/vibe.h` - Added memory debug functions
   - `user/bin/sysmon.c` - Added Memory Debug section
+
+### Session 37
+- **CSS Engine - Full CSS support for the browser!**
+- **New files:**
+  - `user/bin/browser/css.h` (~950 lines) - Complete CSS parser and style engine:
+    - CSS value types (length units: px, em, rem, %)
+    - Display modes (block, inline, inline-block, none, table, flex, list-item)
+    - Float, position, visibility properties
+    - Box model (width, height, margin, padding)
+    - Text properties (color, background-color, font-size, font-weight, font-style, text-align, text-decoration, white-space, vertical-align)
+    - CSS selector parsing (tag, .class, #id, [attr], *, combinators: >, +, ~, descendant)
+    - Specificity calculation for cascade
+    - `<style>` block parsing
+    - Inline style attribute parsing
+    - Pseudo-selector skipping (:hover, :focus, :not(), etc.)
+  - `user/bin/browser/dom.h` (~400 lines) - Proper DOM tree structure:
+    - DOM nodes (element and text types)
+    - Tree structure (parent, children, siblings)
+    - Attribute storage (id, class, style, href)
+    - User-agent default styles for HTML elements
+    - Style inheritance (color, font-size, etc. inherit from parent)
+    - Computed style calculation (cascade: UA → stylesheet → inline)
+    - Selector matching against DOM nodes
+- **Updated files:**
+  - `user/bin/browser/html.h` - Rewrote HTML parser to build DOM tree:
+    - Creates proper tree structure instead of flat list
+    - Extracts `<style>` blocks and parses them
+    - Stores id, class, style, href attributes on nodes
+    - Computes styles after parsing
+    - `dom_to_blocks()` converts DOM to flat render list (legacy compatibility)
+    - Fixed: href attribute now stored properly (was placeholder)
+    - Fixed: Duplicate newline prevention (tracks last_was_newline)
+  - `user/bin/browser/main.c` - Updated renderer:
+    - Uses CSS colors from text blocks
+    - Uses CSS font-size for TTF rendering
+    - Uses CSS margin-left for indentation
+    - Skips blocks with `display:none` (is_hidden flag)
+    - Fixed TTF word wrapping (was going off-screen):
+      - Estimates char width based on font size (not fixed 8px)
+      - Renders word-by-word with wrap check
+      - Wraps to next line if word would exceed right edge
+  - `user/lib/crt0.S` - Added memcpy, memmove, memset implementations:
+    - GCC generates calls to these for struct copies with -O3
+    - Assembly implementations for AArch64
+- **Bug fixes:**
+  - CSS parser infinite loop on Wikipedia - selectors starting with `:` caused hang
+  - Added pseudo-selector skipping (`:hover`, `:not()`, `::before`, etc.)
+  - Added safety: skip unknown characters, handle malformed rules gracefully
+  - Links were untappable - href wasn't being stored/passed through
+- **Wikipedia now renders!** (was hanging before)
+- **Text wraps properly** (was going off-screen)
+- **Reduced whitespace** (was adding double newlines everywhere)
+- **Links clickable again** (href properly stored in DOM and passed to renderer)
+- **Achievement**: CSS engine complete! Wikipedia is usable!

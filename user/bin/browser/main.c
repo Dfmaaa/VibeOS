@@ -75,8 +75,12 @@ static int scrollbar_h = 0;
 #define SCROLLBAR_W 12
 #define BACK_BTN_W 24
 
-// Get font size for a text block
+// Get font size for a text block (now uses CSS font_size)
 static int get_font_size(text_block_t *block) {
+    // Use CSS font size if set, otherwise fall back to heading-based
+    if (block->font_size > 0) {
+        return block->font_size;
+    }
     if (block->is_heading) {
         switch (block->is_heading) {
             case 1: return FONT_SIZE_H1;
@@ -147,6 +151,12 @@ static void draw_browser(void) {
     while (block) {
         if (y > win_h) break;
 
+        // Skip hidden blocks (CSS display:none or visibility:hidden)
+        if (block->is_hidden) {
+            block = block->next;
+            continue;
+        }
+
         // Get font parameters for this block
         int font_size = use_ttf ? get_font_size(block) : CHAR_H;
         int font_style = use_ttf ? get_font_style(block) : 0;
@@ -175,7 +185,7 @@ static void draw_browser(void) {
             current_line_height = line_height;
         }
 
-        // Adjust margin for blockquotes and list items
+        // Adjust margin for blockquotes, list items, and CSS margin
         int left_margin = base_margin;
         if (block->is_blockquote) {
             left_margin += 16;  // Indent blockquotes
@@ -183,10 +193,19 @@ static void draw_browser(void) {
         if (block->is_list_item) {
             left_margin += 24;  // Indent list items
         }
+        // Add CSS margin-left
+        if (block->margin_left > 0) {
+            left_margin += block->margin_left;
+        }
 
         // Calculate max width for this block
         int max_width = content_width - (left_margin - base_margin);
-        int line_max = max_width / CHAR_W;  // For word wrap calculations
+
+        // For TTF, estimate chars per line based on average char width
+        // TTF fonts average ~0.5 to 0.6 of font_size per character
+        int avg_char_width = use_ttf ? (font_size * 6 / 10) : CHAR_W;
+        if (avg_char_width < 4) avg_char_width = 4;
+        int line_max = max_width / avg_char_width;
 
         // Track if we're on first line of block (for bullet rendering)
         int first_line = 1;
@@ -207,6 +226,7 @@ static void draw_browser(void) {
                     line_len++;
                 }
             } else {
+                // Use a conservative estimate for line length
                 while (pos + line_len < len && line_len < line_max) {
                     if (text[pos + line_len] == '\n') break;
                     if (text[pos + line_len] == ' ') last_space = line_len;
@@ -221,16 +241,19 @@ static void draw_browser(void) {
 
             // Draw line if visible
             if (y + CHAR_H > CONTENT_Y && y < win_h - 16) {
-                // Determine foreground color
-                uint32_t fg = COLOR_BLACK;
-                uint32_t bg = COLOR_WHITE;
+                // Determine foreground and background colors from CSS
+                uint32_t fg = block->color ? block->color : COLOR_BLACK;
+                uint32_t bg = (block->bg_color && block->bg_color != 0xFFFFFF) ? block->bg_color : COLOR_WHITE;
 
+                // Override for special elements
                 if (block->is_link) {
-                    fg = 0x000000FF;  // Blue for links
-                } else if (block->is_image) {
+                    fg = 0x000000FF;  // Blue for links (CSS may override)
+                }
+                if (block->is_image) {
                     fg = 0x00666666;  // Gray for image placeholders
                     bg = 0x00EEEEEE;  // Light gray background
-                } else if (block->is_preformatted) {
+                }
+                if (block->is_preformatted && bg == COLOR_WHITE) {
                     bg = 0x00F0F0F0;  // Slight gray background for code
                 }
 
@@ -297,10 +320,42 @@ static void draw_browser(void) {
                 line_buf[line_buf_len] = '\0';
 
                 if (use_ttf && k->ttf_is_ready && k->ttf_is_ready()) {
-                    // TTF rendering
-                    actual_width = gfx_draw_ttf_string(&gfx, k, x, y, line_buf,
+                    // TTF rendering - render word by word for proper wrapping
+                    int right_edge = win_w - SCROLLBAR_W - MARGIN;
+                    int word_start = 0;
+                    actual_width = 0;
+
+                    while (word_start < line_buf_len) {
+                        // Find next word
+                        int word_end = word_start;
+                        while (word_end < line_buf_len && line_buf[word_end] != ' ') word_end++;
+
+                        // Include trailing space
+                        if (word_end < line_buf_len && line_buf[word_end] == ' ') word_end++;
+
+                        // Build word string
+                        char word[128];
+                        int word_len = word_end - word_start;
+                        if (word_len > 127) word_len = 127;
+                        for (int i = 0; i < word_len; i++) word[i] = line_buf[word_start + i];
+                        word[word_len] = '\0';
+
+                        // Estimate word width (no measure function available)
+                        int word_width = word_len * avg_char_width;
+
+                        // Check if we need to wrap
+                        if (x + word_width > right_edge && x > left_margin) {
+                            y += line_height;
+                            x = left_margin;
+                        }
+
+                        // Draw the word
+                        int drawn = gfx_draw_ttf_string(&gfx, k, x, y, word,
                                                         font_size, font_style, fg, bg);
-                    x += actual_width;
+                        x += drawn;
+                        actual_width += drawn;
+                        word_start = word_end;
+                    }
                 } else {
                     // Bitmap font fallback
                     for (int i = 0; i < line_buf_len; i++) {
@@ -418,8 +473,25 @@ static void navigate(const char *url) {
     navigate_internal(url, 1);
 }
 
+// Helper to show an error message
+static void show_error(const char *msg) {
+    // Create a simple error page as HTML
+    char html[256];
+    char *p = html;
+    const char *s = "<html><body><h1>Error</h1><p>";
+    while (*s) *p++ = *s++;
+    while (*msg) *p++ = *msg++;
+    s = "</p></body></html>";
+    while (*s) *p++ = *s++;
+    *p = '\0';
+
+    parse_html(html, p - html);
+    dom_to_blocks();
+}
+
 static void navigate_internal(const char *url, int add_to_history) {
     (void)add_to_history;
+    k->uart_puts("[NAV] start\n");
     str_cpy(current_url, url);
     str_cpy(url_input, url);
     free_blocks();
@@ -428,15 +500,17 @@ static void navigate_internal(const char *url, int add_to_history) {
     draw_browser();
 
     url_t parsed;
+    k->uart_puts("[NAV] parsing url\n");
     if (parse_url(url, &parsed) < 0) {
-        add_block("Error: Invalid URL", 18, 1, 0, 0, 0, 0);
+        show_error("Invalid URL");
         draw_browser();
         return;
     }
 
+    k->uart_puts("[NAV] malloc\n");
     char *response = k->malloc(131072);  // 128KB
     if (!response) {
-        add_block("Error: Out of memory", 20, 1, 0, 0, 0, 0);
+        show_error("Out of memory");
         draw_browser();
         return;
     }
@@ -445,13 +519,15 @@ static void navigate_internal(const char *url, int add_to_history) {
     int redirects = 0;
 
     while (1) {
+        k->uart_puts("[NAV] http_get\n");
         int len = http_get(k, &parsed, response, 131072, &resp);
 
         if (len <= 0) {
-            add_block("Error: No response from server", 30, 1, 0, 0, 0, 0);
+            show_error("No response from server");
             break;
         }
 
+        k->uart_puts("[NAV] got response\n");
         if (is_redirect(resp.status_code) && resp.location[0] && redirects < 5) {
             redirects++;
             // Check if it's a relative URL (starts with /)
@@ -467,13 +543,20 @@ static void navigate_internal(const char *url, int add_to_history) {
 
         // For non-200 responses, still try to render the body (many sites return HTML error pages)
         if (resp.header_len > 0 && resp.header_len < len) {
+            k->uart_puts("[NAV] parse_html\n");
             parse_html(response + resp.header_len, len - resp.header_len);
+            k->uart_puts("[NAV] dom_to_blocks\n");
+            dom_to_blocks();  // Convert DOM tree to flat blocks for rendering
+            k->uart_puts("[NAV] done parsing\n");
         }
         break;
     }
 
+    k->uart_puts("[NAV] free\n");
     k->free(response);
+    k->uart_puts("[NAV] draw\n");
     draw_browser();
+    k->uart_puts("[NAV] done\n");
 }
 
 int main(kapi_t *kapi, int argc, char **argv) {
