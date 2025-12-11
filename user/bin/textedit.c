@@ -51,6 +51,11 @@ static int save_as_mode = 0;
 static char save_as_buf[256];
 static int save_as_len = 0;
 
+// Unsaved changes dialog state
+static int confirm_close_mode = 0;  // 0=not showing, 1=showing
+static int confirm_close_hover = -1;  // Which button is hovered (-1, 0, 1, 2)
+static int pending_close = 0;  // Set to 1 when we need to close after save
+
 // Syntax highlighting
 static int syntax_c = 0;  // Is this a .c or .h file?
 
@@ -330,6 +335,58 @@ static void draw_save_as_modal(void) {
 
     // Draw hint
     buf_draw_string(modal_x + 8, modal_y + 56, "Enter=Save  Esc=Cancel", COLOR_BLACK, COLOR_WHITE);
+}
+
+static void draw_confirm_close_modal(void) {
+    // Modal dimensions
+    int modal_w = 320;
+    int modal_h = 100;
+    int modal_x = (win_w - modal_w) / 2;
+    int modal_y = (win_h - modal_h) / 2;
+
+    // Draw shadow
+    buf_fill_rect(modal_x + 3, modal_y + 3, modal_w, modal_h, 0x00888888);
+
+    // Draw modal background
+    buf_fill_rect(modal_x, modal_y, modal_w, modal_h, COLOR_WHITE);
+
+    // Draw border
+    buf_fill_rect(modal_x, modal_y, modal_w, 1, COLOR_BLACK);
+    buf_fill_rect(modal_x, modal_y + modal_h - 1, modal_w, 1, COLOR_BLACK);
+    buf_fill_rect(modal_x, modal_y, 1, modal_h, COLOR_BLACK);
+    buf_fill_rect(modal_x + modal_w - 1, modal_y, 1, modal_h, COLOR_BLACK);
+
+    // Draw message
+    buf_draw_string(modal_x + 16, modal_y + 12, "You have unsaved changes.", COLOR_BLACK, COLOR_WHITE);
+    buf_draw_string(modal_x + 16, modal_y + 30, "Save before closing?", COLOR_BLACK, COLOR_WHITE);
+
+    // Button dimensions
+    int btn_w = 85;
+    int btn_h = 24;
+    int btn_y = modal_y + 60;
+    int btn_spacing = 10;
+    int total_btn_w = 3 * btn_w + 2 * btn_spacing;
+    int btn_start_x = modal_x + (modal_w - total_btn_w) / 2;
+
+    // Draw buttons: [Save] [Don't Save] [Cancel]
+    const char *labels[] = {"Save", "Don't Save", "Cancel"};
+    for (int i = 0; i < 3; i++) {
+        int bx = btn_start_x + i * (btn_w + btn_spacing);
+        uint32_t bg = (i == confirm_close_hover) ? COLOR_BLACK : COLOR_WHITE;
+        uint32_t fg = (i == confirm_close_hover) ? COLOR_WHITE : COLOR_BLACK;
+
+        buf_fill_rect(bx, btn_y, btn_w, btn_h, bg);
+        buf_fill_rect(bx, btn_y, btn_w, 1, COLOR_BLACK);
+        buf_fill_rect(bx, btn_y + btn_h - 1, btn_w, 1, COLOR_BLACK);
+        buf_fill_rect(bx, btn_y, 1, btn_h, COLOR_BLACK);
+        buf_fill_rect(bx + btn_w - 1, btn_y, 1, btn_h, COLOR_BLACK);
+
+        // Center label
+        int label_len = strlen(labels[i]);
+        int label_x = bx + (btn_w - label_len * CHAR_W) / 2;
+        int label_y = btn_y + (btn_h - CHAR_H) / 2;
+        buf_draw_string(label_x, label_y, labels[i], fg, bg);
+    }
 }
 
 // Draw a line number right-aligned in the gutter
@@ -617,6 +674,11 @@ static void draw_all(void) {
         draw_save_as_modal();
     }
 
+    // Draw confirm close modal if active
+    if (confirm_close_mode) {
+        draw_confirm_close_modal();
+    }
+
     api->window_invalidate(window_id);
 }
 
@@ -810,12 +872,111 @@ int main(kapi_t *kapi, int argc, char **argv) {
         while (api->window_poll_event(window_id, &event_type, &data1, &data2, &data3)) {
             switch (event_type) {
                 case WIN_EVENT_CLOSE:
-                    running = 0;
+                    if (modified) {
+                        // Show confirm dialog instead of closing
+                        confirm_close_mode = 1;
+                        confirm_close_hover = -1;
+                        draw_all();
+                    } else {
+                        running = 0;
+                    }
                     break;
 
                 case WIN_EVENT_KEY:
-                    handle_key(data1);
-                    draw_all();
+                    if (confirm_close_mode) {
+                        // Handle confirm dialog keys
+                        if (data1 == 0x1B) {  // Escape = Cancel
+                            confirm_close_mode = 0;
+                        } else if (data1 == 's' || data1 == 'S' || data1 == '\r' || data1 == '\n') {
+                            // Save
+                            confirm_close_mode = 0;
+                            pending_close = 1;
+                            save_file();
+                            if (!save_as_mode && !modified) {
+                                running = 0;
+                            }
+                        } else if (data1 == 'd' || data1 == 'D' || data1 == 'n' || data1 == 'N') {
+                            // Don't Save
+                            confirm_close_mode = 0;
+                            running = 0;
+                        }
+                        draw_all();
+                    } else {
+                        handle_key(data1);
+                        // Check if we were waiting to close after save
+                        if (pending_close && !save_as_mode && !modified) {
+                            running = 0;
+                        }
+                        draw_all();
+                    }
+                    break;
+
+                case WIN_EVENT_MOUSE_DOWN:
+                    if (confirm_close_mode) {
+                        int mx = data1, my = data2;
+                        // Check button clicks
+                        int modal_w = 320;
+                        int modal_h = 100;
+                        int modal_x = (win_w - modal_w) / 2;
+                        int modal_y = (win_h - modal_h) / 2;
+                        int btn_w = 85;
+                        int btn_h = 24;
+                        int btn_y = modal_y + 60;
+                        int btn_spacing = 10;
+                        int total_btn_w = 3 * btn_w + 2 * btn_spacing;
+                        int btn_start_x = modal_x + (modal_w - total_btn_w) / 2;
+
+                        for (int i = 0; i < 3; i++) {
+                            int bx = btn_start_x + i * (btn_w + btn_spacing);
+                            if (mx >= bx && mx < bx + btn_w && my >= btn_y && my < btn_y + btn_h) {
+                                if (i == 0) {  // Save
+                                    confirm_close_mode = 0;
+                                    pending_close = 1;
+                                    save_file();
+                                    if (!save_as_mode && !modified) {
+                                        running = 0;
+                                    }
+                                } else if (i == 1) {  // Don't Save
+                                    confirm_close_mode = 0;
+                                    running = 0;
+                                } else {  // Cancel
+                                    confirm_close_mode = 0;
+                                }
+                                break;
+                            }
+                        }
+                        draw_all();
+                    }
+                    break;
+
+                case WIN_EVENT_MOUSE_MOVE:
+                    if (confirm_close_mode) {
+                        int mx = data1, my = data2;
+                        // Check button hover
+                        int modal_w = 320;
+                        int modal_h = 100;
+                        int modal_x = (win_w - modal_w) / 2;
+                        int modal_y = (win_h - modal_h) / 2;
+                        int btn_w = 85;
+                        int btn_h = 24;
+                        int btn_y = modal_y + 60;
+                        int btn_spacing = 10;
+                        int total_btn_w = 3 * btn_w + 2 * btn_spacing;
+                        int btn_start_x = modal_x + (modal_w - total_btn_w) / 2;
+
+                        int new_hover = -1;
+                        for (int i = 0; i < 3; i++) {
+                            int bx = btn_start_x + i * (btn_w + btn_spacing);
+                            if (mx >= bx && mx < bx + btn_w && my >= btn_y && my < btn_y + btn_h) {
+                                new_hover = i;
+                                break;
+                            }
+                        }
+                        if (new_hover != confirm_close_hover) {
+                            confirm_close_hover = new_hover;
+                            draw_all();
+                        }
+                    }
                     break;
 
                 case WIN_EVENT_RESIZE:

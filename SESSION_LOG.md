@@ -863,3 +863,13 @@
   - Files app now opens files concurrently (can open multiple at once)
   - `kernel/kapi.c`, `kernel/kapi.h`, `user/lib/vibe.h` updated
 - **Achievement**: File associations complete! Double-click any file to open it!
+
+- **TextEdit - Unsaved Changes Warning:**
+  - Shows dialog when closing with unsaved changes
+  - "You have unsaved changes. Save before closing?"
+  - Three buttons: [Save] [Don't Save] [Cancel]
+  - Keyboard shortcuts: S/Enter=Save, D/N=Don't Save, Esc=Cancel
+  - Mouse hover highlighting on buttons
+  - Smart flow: if no filename, opens Save As first, then closes after save
+  - `pending_close` state tracks waiting for save to complete
+- **Achievement**: TextEdit warns before losing work!
