@@ -40,23 +40,6 @@ Polish and complete current feature set.
 - [ ] Arrow keys or click to go prev/next in same directory
 - [ ] Launched from Files app on double-click
 
-### Coreutils - cp and mv
-- [ ] `/bin/cp` - copy files
-  - Basic: `cp source dest`
-  - Recursive: `cp -r dir1 dir2` (implemented in userspace like rm -r)
-- [ ] `/bin/mv` - move/rename files
-  - Same file system: just rename
-  - Different paths: cp + rm
-
-### DOOM
-- [ ] Port doomgeneric
-  - DG_Init → framebuffer setup
-  - DG_DrawFrame → blit to fb
-  - DG_SleepMs → sleep_ms()
-  - DG_GetTicksMs → timer ticks
-  - DG_GetKey → keyboard input
-- [ ] Add to dock or launcher
-- [ ] WAD file on disk
 
 ### General Polish
 - [ ] Bug fixes and stability

@@ -1,5 +1,12 @@
 # VibeOS Makefile
 # Build system for VibeOS - an aarch64 operating system
+#
+# Supports two targets:
+#   make              - Build for QEMU (default)
+#   make TARGET=pi    - Build for Raspberry Pi Zero 2W
+
+# Target selection (default: qemu)
+TARGET ?= qemu
 
 # Cross-compiler toolchain
 # On macOS, install with: brew install aarch64-elf-gcc
@@ -14,14 +21,34 @@ OBJDUMP = $(CROSS_COMPILE)objdump
 # Directories
 BOOT_DIR = boot
 KERNEL_DIR = kernel
+HAL_DIR = kernel/hal
 USER_DIR = user
 BUILD_DIR = build
 USER_BUILD_DIR = $(BUILD_DIR)/user
 
+# Target-specific settings
+ifeq ($(TARGET),pi)
+    # Raspberry Pi Zero 2W
+    HAL_PLATFORM = pizero2w
+    CPU = cortex-a53
+    LINKER_SCRIPT = linker-pi.ld
+    BOOT_SRC = $(BOOT_DIR)/boot-pi.S
+    KERNEL_BIN_NAME = kernel8.img
+    CFLAGS_TARGET = -DTARGET_PI
+else
+    # QEMU virt (default)
+    HAL_PLATFORM = qemu
+    CPU = cortex-a72
+    LINKER_SCRIPT = linker.ld
+    BOOT_SRC = $(BOOT_DIR)/boot.S
+    KERNEL_BIN_NAME = vibeos.bin
+    CFLAGS_TARGET = -DTARGET_QEMU
+endif
+
 # Source files
-BOOT_SRC = $(BOOT_DIR)/boot.S
 KERNEL_C_SRCS = $(wildcard $(KERNEL_DIR)/*.c)
 KERNEL_S_SRCS = $(wildcard $(KERNEL_DIR)/*.S)
+HAL_C_SRCS = $(wildcard $(HAL_DIR)/$(HAL_PLATFORM)/*.c)
 
 # Userspace programs to build and install to disk
 # Note: browser is handled specially (multi-file build from user/bin/browser/)
@@ -32,7 +59,8 @@ USER_PROGS_MULTIFILE = browser
 BOOT_OBJ = $(BUILD_DIR)/boot.o
 KERNEL_C_OBJS = $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(KERNEL_C_SRCS))
 KERNEL_S_OBJS = $(patsubst $(KERNEL_DIR)/%.S,$(BUILD_DIR)/%.o,$(KERNEL_S_SRCS))
-KERNEL_OBJS = $(KERNEL_C_OBJS) $(KERNEL_S_OBJS)
+HAL_OBJS = $(patsubst $(HAL_DIR)/$(HAL_PLATFORM)/%.c,$(BUILD_DIR)/hal_%.o,$(HAL_C_SRCS))
+KERNEL_OBJS = $(KERNEL_C_OBJS) $(KERNEL_S_OBJS) $(HAL_OBJS)
 
 # Userspace ELF files (installed to disk, NOT embedded in kernel)
 USER_ELFS = $(patsubst %,$(USER_BUILD_DIR)/%.elf,$(USER_PROGS))
@@ -40,7 +68,7 @@ USER_ELFS_MULTIFILE = $(patsubst %,$(USER_BUILD_DIR)/%.elf,$(USER_PROGS_MULTIFIL
 
 # Output files
 KERNEL_ELF = $(BUILD_DIR)/vibeos.elf
-KERNEL_BIN = $(BUILD_DIR)/vibeos.bin
+KERNEL_BIN = $(BUILD_DIR)/$(KERNEL_BIN_NAME)
 DISK_IMG = disk.img
 DISK_SIZE = 1024
 
@@ -48,30 +76,49 @@ DISK_SIZE = 1024
 # Floating point enabled (no -mgeneral-regs-only)
 # Use -mstrict-align to avoid unaligned SIMD accesses
 # -I$(KERNEL_DIR)/libc is for TLSe to find our stdlib stubs
-CFLAGS = -ffreestanding -nostdlib -nostartfiles -mcpu=cortex-a72 -mstrict-align -Wall -Wextra -O3 -I$(KERNEL_DIR) -I$(KERNEL_DIR)/libc
+CFLAGS = -ffreestanding -nostdlib -nostartfiles -mcpu=$(CPU) -mstrict-align -Wall -Wextra -O3 -I$(KERNEL_DIR) -I$(KERNEL_DIR)/libc $(CFLAGS_TARGET)
 
 # Special flags for TLS (TLSe is huge and noisy)
-TLS_CFLAGS = -ffreestanding -nostdlib -nostartfiles -mcpu=cortex-a72 -mstrict-align -O2 -I$(KERNEL_DIR) -I$(KERNEL_DIR)/libc -w
-ASFLAGS = -mcpu=cortex-a72
-LDFLAGS = -nostdlib -T linker.ld
+TLS_CFLAGS = -ffreestanding -nostdlib -nostartfiles -mcpu=$(CPU) -mstrict-align -O2 -I$(KERNEL_DIR) -I$(KERNEL_DIR)/libc -w $(CFLAGS_TARGET)
+ASFLAGS = -mcpu=$(CPU)
+LDFLAGS = -nostdlib -T $(LINKER_SCRIPT)
 
 # Userspace compiler flags (PIE for position-independent loading) - YOLO -O3
-USER_CFLAGS = -ffreestanding -nostdlib -nostartfiles -mcpu=cortex-a72 -mstrict-align -fPIE -Wall -Wextra -O3 -I$(USER_DIR)/lib
+USER_CFLAGS = -ffreestanding -nostdlib -nostartfiles -mcpu=$(CPU) -mstrict-align -fPIE -Wall -Wextra -O3 -I$(USER_DIR)/lib
 USER_LDFLAGS = -nostdlib -pie -T user/linker.ld
 
-# QEMU settings
+# QEMU settings (only used for QEMU target)
 QEMU = qemu-system-aarch64
 # Graphical mode with virtio-keyboard, virtio-tablet (mouse), virtio-blk disk, virtio-sound, and virtio-net
 # Use force-legacy=false to get modern virtio (version 2) which is easier to program
 # Use secure=on and -bios to boot at EL3 with full GIC access
 # Network: user-mode NAT networking (guest IP: 10.0.2.15, gateway: 10.0.2.2, DNS: 10.0.2.3)
-QEMU_FLAGS = -M virt,secure=on -cpu cortex-a72 -m 512M -rtc base=utc,clock=host -global virtio-mmio.force-legacy=false -device ramfb -device virtio-blk-device,drive=hd0 -drive file=$(DISK_IMG),if=none,format=raw,id=hd0 -device virtio-keyboard-device -device virtio-tablet-device -device virtio-sound-device,audiodev=audio0 -audiodev coreaudio,id=audio0 -device virtio-net-device,netdev=net0 -netdev user,id=net0 -serial stdio -bios $(KERNEL_BIN)
+QEMU_FLAGS = -M virt,secure=on -cpu cortex-a72 -m 512M -rtc base=utc,clock=host -global virtio-mmio.force-legacy=false -device ramfb -device virtio-blk-device,drive=hd0 -drive file=$(DISK_IMG),if=none,format=raw,id=hd0 -device virtio-keyboard-device -device virtio-tablet-device -device virtio-sound-device,audiodev=audio0 -audiodev coreaudio,id=audio0 -device virtio-net-device,netdev=net0 -netdev user,id=net0 -serial stdio -bios $(BUILD_DIR)/vibeos.bin
 # No-graphics mode (terminal only) - no keyboard in nographic mode
-QEMU_FLAGS_NOGRAPHIC = -M virt,secure=on -cpu cortex-a72 -m 512M -rtc base=utc,clock=host -global virtio-mmio.force-legacy=false -device virtio-blk-device,drive=hd0 -drive file=$(DISK_IMG),if=none,format=raw,id=hd0 -device virtio-sound-device,audiodev=audio0 -audiodev coreaudio,id=audio0 -device virtio-net-device,netdev=net0 -netdev user,id=net0 -nographic -bios $(KERNEL_BIN)
+QEMU_FLAGS_NOGRAPHIC = -M virt,secure=on -cpu cortex-a72 -m 512M -rtc base=utc,clock=host -global virtio-mmio.force-legacy=false -device virtio-blk-device,drive=hd0 -drive file=$(DISK_IMG),if=none,format=raw,id=hd0 -device virtio-sound-device,audiodev=audio0 -audiodev coreaudio,id=audio0 -device virtio-net-device,netdev=net0 -netdev user,id=net0 -nographic -bios $(BUILD_DIR)/vibeos.bin
 
-.PHONY: all clean run run-nographic debug user disk install-user
+.PHONY: all clean run run-nographic debug user disk install-user pi install-pi
 
 all: $(KERNEL_BIN)
+	@echo ""
+	@echo "Built for target: $(TARGET)"
+	@echo "Output: $(KERNEL_BIN)"
+
+# Shortcut for Pi build
+pi:
+	$(MAKE) TARGET=pi
+
+# Install to Pi SD card
+# Usage: make install-pi DISK=disk5s2
+install-pi: pi
+	@if [ -z "$(DISK)" ]; then \
+		echo "Usage: make install-pi DISK=<disk>"; \
+		echo "Example: make install-pi DISK=disk5s2"; \
+		echo ""; \
+		echo "Run 'diskutil list' to find your SD card"; \
+		exit 1; \
+	fi
+	./scripts/install-pi.sh $(DISK)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -85,6 +132,10 @@ $(BOOT_OBJ): $(BOOT_SRC) | $(BUILD_DIR)
 
 # Kernel C objects
 $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# HAL C objects
+$(BUILD_DIR)/hal_%.o: $(HAL_DIR)/$(HAL_PLATFORM)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Special rule for TLS (includes huge third-party library)
@@ -153,8 +204,13 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 	@echo ""
 	@echo "========================================="
 	@echo "  VibeOS built successfully!"
+	@echo "  Target: $(TARGET)"
 	@echo "  Binary: $(KERNEL_BIN)"
+ifeq ($(TARGET),qemu)
 	@echo "  Run with: make run"
+else
+	@echo "  Copy to SD card as kernel8.img"
+endif
 	@echo "========================================="
 
 # Create disk image with FAT32 filesystem
@@ -189,13 +245,13 @@ $(DISK_IMG):
 	@echo "    hdiutil detach /Volumes/VIBEOS"
 	@echo "========================================="
 
-run: $(KERNEL_BIN) install-user
+run: $(BUILD_DIR)/vibeos.bin install-user
 	$(QEMU) $(QEMU_FLAGS)
 
-run-nographic: $(KERNEL_BIN) $(DISK_IMG)
+run-nographic: $(BUILD_DIR)/vibeos.bin $(DISK_IMG)
 	$(QEMU) $(QEMU_FLAGS_NOGRAPHIC)
 
-debug: $(KERNEL_BIN)
+debug: $(BUILD_DIR)/vibeos.bin
 	$(QEMU) $(QEMU_FLAGS) -S -s
 
 disasm: $(KERNEL_ELF)

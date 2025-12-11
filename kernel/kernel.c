@@ -24,45 +24,30 @@
 #include "virtio_net.h"
 #include "net.h"
 #include "ttf.h"
+#include "hal/hal.h"
 
-// QEMU virt machine PL011 UART base address
-#define UART0_BASE 0x09000000
-
-// PL011 UART registers
-#define UART_DR     (*(volatile uint32_t *)(UART0_BASE + 0x00))  // Data Register
-#define UART_FR     (*(volatile uint32_t *)(UART0_BASE + 0x18))  // Flag Register
-#define UART_FR_TXFF (1 << 5)  // Transmit FIFO Full
-#define UART_FR_RXFE (1 << 4)  // Receive FIFO Empty
-
+// UART functions now use HAL
 void uart_putc(char c) {
-    // Wait until transmit FIFO is not full
-    while (UART_FR & UART_FR_TXFF) {
-        asm volatile("nop");
-    }
-    UART_DR = c;
+    hal_serial_putc(c);
 }
 
 void uart_puts(const char *s) {
     while (*s) {
-        if (*s == '\n') uart_putc('\r');
-        uart_putc(*s++);
+        if (*s == '\n') hal_serial_putc('\r');
+        hal_serial_putc(*s++);
     }
 }
 
 int uart_getc(void) {
-    // Return -1 if no data available
-    if (UART_FR & UART_FR_RXFE) {
-        return -1;
-    }
-    return UART_DR & 0xFF;
+    return hal_serial_getc();
 }
 
 int uart_getc_blocking(void) {
-    // Wait for data
-    while (UART_FR & UART_FR_RXFE) {
+    int c;
+    while ((c = hal_serial_getc()) < 0) {
         asm volatile("nop");
     }
-    return UART_DR & 0xFF;
+    return c;
 }
 
 void kernel_main(void) {

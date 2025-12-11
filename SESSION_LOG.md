@@ -873,3 +873,50 @@
   - Smart flow: if no filename, opens Save As first, then closes after save
   - `pending_close` state tracks waiting for save to complete
 - **Achievement**: TextEdit warns before losing work!
+
+### Session 39
+- **V1 COMPLETE - Raspberry Pi Zero 2W Port Begins!**
+- **Hardware Abstraction Layer (HAL) created:**
+  - `kernel/hal/hal.h` - Common interface for platform-specific hardware
+  - `kernel/hal/qemu/` - QEMU virt machine implementations
+    - `fb.c` - ramfb via fw_cfg
+    - `serial.c` - PL011 UART
+    - `platform.c` - Platform info
+  - `kernel/hal/pizero2w/` - Raspberry Pi Zero 2W implementations
+    - `fb.c` - VideoCore mailbox framebuffer
+    - `serial.c` - Mini UART (GPIO 14/15)
+    - `platform.c` - Platform info
+- **Updated core kernel to use HAL:**
+  - `kernel/fb.c` - Now calls `hal_fb_init()` and `hal_fb_get_info()`
+  - `kernel/kernel.c` - UART functions now wrap HAL serial calls
+- **Pi-specific boot code:**
+  - `boot/boot-pi.S` - Entry point for Pi (loads at 0x80000, drops from EL2→EL1)
+  - `linker-pi.ld` - Memory layout for Pi (no separate flash region)
+- **Build system updated:**
+  - `TARGET=qemu` (default) - Builds `build/vibeos.bin`
+  - `TARGET=pi` or `make pi` - Builds `build/kernel8.img`
+  - HAL files automatically selected based on target
+- **SD card installer script:**
+  - `scripts/install-pi.sh` - Downloads Pi firmware, formats SD, installs VibeOS
+  - `make install-pi DISK=disk5s2` - One-command install
+  - Downloads bootcode.bin, start.elf, fixup.dat from official Pi firmware repo
+  - Creates config.txt with arm_64bit=1
+- **FIRST BOOT ON REAL HARDWARE - IT WORKS!**
+  - Pi Zero 2W boots to VibeOS splash screen!
+  - VideoCore mailbox framebuffer working
+  - Console text rendering working
+  - Full boot sequence completes
+  - Drops to recovery shell (expected - no disk/keyboard drivers yet)
+- **What works on Pi:**
+  - Boot sequence (EL2→EL1 transition)
+  - FPU initialization
+  - Exception vectors
+  - Framebuffer via VideoCore mailbox
+  - Console and font rendering
+  - Memory allocator
+  - Printf/kernel init
+- **What's missing (expected - need new drivers):**
+  - Block device (need SDHCI driver for SD card)
+  - Keyboard/Mouse (need USB HID stack)
+  - Sound/Network (skip for v1 Pi port)
+- **Achievement**: VibeOS boots on real hardware! First try!
