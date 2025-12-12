@@ -20,6 +20,10 @@ static int num_cols = 0;
 static uint32_t fg_color = COLOR_WHITE;
 static uint32_t bg_color = COLOR_BLACK;
 
+// Cursor blink state
+static int cursor_visible = 0;
+static int cursor_enabled = 1;
+
 // Text buffer for scrolling
 static char *text_buffer = NULL;
 static uint32_t *fg_buffer = NULL;
@@ -72,6 +76,9 @@ static void newline(void) {
     }
 }
 
+// Forward declaration
+static void draw_cursor(int show);
+
 void console_putc(char c) {
     // If console not initialized, fall back to UART
     if (!console_initialized) {
@@ -79,6 +86,11 @@ void console_putc(char c) {
         if (c == '\n') uart_putc('\r');
         uart_putc(c);
         return;
+    }
+
+    // Hide cursor before any operation that might move it
+    if (cursor_visible) {
+        draw_cursor(0);
     }
 
     switch (c) {
@@ -99,10 +111,9 @@ void console_putc(char c) {
             break;
 
         case '\b':
-            // Backspace
+            // Backspace - only move cursor, don't erase
             if (cursor_col > 0) {
                 cursor_col--;
-                draw_char_at(cursor_row, cursor_col, ' ');
             }
             break;
 
@@ -137,6 +148,10 @@ void console_clear(void) {
 }
 
 void console_set_cursor(int row, int col) {
+    // Hide cursor before moving
+    if (cursor_visible) {
+        draw_cursor(0);
+    }
     if (row >= 0 && row < num_rows) cursor_row = row;
     if (col >= 0 && col < num_cols) cursor_col = col;
 }
@@ -157,4 +172,48 @@ int console_rows(void) {
 
 int console_cols(void) {
     return num_cols;
+}
+
+// Draw/undraw cursor at current position by inverting pixels
+static void draw_cursor(int show) {
+    if (!console_initialized || fb_base == NULL) return;
+    if (show == cursor_visible) return;  // Already in desired state
+
+    uint32_t x = cursor_col * FONT_WIDTH;
+    uint32_t y = cursor_row * FONT_HEIGHT;
+
+    // Toggle pixels (XOR-style invert)
+    for (int dy = 0; dy < FONT_HEIGHT; dy++) {
+        for (int dx = 0; dx < FONT_WIDTH; dx++) {
+            uint32_t px = x + dx;
+            uint32_t py = y + dy;
+            if (px < fb_width && py < fb_height) {
+                uint32_t *pixel = fb_base + py * fb_width + px;
+                // Invert: swap fg and bg
+                *pixel = (*pixel == bg_color) ? fg_color : bg_color;
+            }
+        }
+    }
+    cursor_visible = show;
+}
+
+// Toggle cursor visibility (called by timer)
+void console_blink_cursor(void) {
+    if (!cursor_enabled) return;
+    draw_cursor(!cursor_visible);
+}
+
+// Enable/disable cursor
+void console_set_cursor_enabled(int enabled) {
+    if (!enabled && cursor_visible) {
+        draw_cursor(0);  // Hide cursor
+    }
+    cursor_enabled = enabled;
+}
+
+// Force redraw cursor (call after moving cursor)
+void console_show_cursor(void) {
+    if (cursor_enabled && !cursor_visible) {
+        draw_cursor(1);
+    }
 }

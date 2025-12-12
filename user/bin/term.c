@@ -46,6 +46,10 @@ static int scroll_offset = 0;    // How many lines scrolled back (0 = at bottom)
 static int cursor_row = 0;       // Row within visible area
 static int cursor_col = 0;
 
+// Cursor blink state
+static int cursor_visible = 1;
+static unsigned long last_blink_tick = 0;
+
 // Input buffer (ring buffer for keyboard input) - uses int for special keys
 #define INPUT_BUF_SIZE 256
 static int input_buffer[INPUT_BUF_SIZE];
@@ -54,6 +58,9 @@ static int input_tail = 0;
 
 // Flag to track if shell is still running
 static int shell_running = 1;
+
+// Forward declarations
+static void redraw_screen(void);
 
 // ============ Scrollback Buffer Management ============
 
@@ -150,8 +157,8 @@ static void draw_char_at(int row, int col, char c) {
 }
 
 static void draw_cursor(void) {
-    // Only draw cursor if we're at the bottom (not scrolled back)
-    if (scroll_offset != 0) return;
+    // Only draw cursor if we're at the bottom (not scrolled back) and visible
+    if (scroll_offset != 0 || !cursor_visible) return;
 
     // Draw cursor as inverse block
     int px = cursor_col * CHAR_WIDTH;
@@ -165,6 +172,17 @@ static void draw_cursor(void) {
                 win_buffer[idx] = win_buffer[idx] == TERM_BG ? TERM_FG : TERM_BG;
             }
         }
+    }
+}
+
+// Update cursor blink state
+static void update_cursor_blink(void) {
+    unsigned long now = api->get_uptime_ticks();
+    // Blink every 50 ticks (500ms at 100Hz)
+    if (now - last_blink_tick >= 50) {
+        cursor_visible = !cursor_visible;
+        last_blink_tick = now;
+        redraw_screen();
     }
 }
 
@@ -430,6 +448,10 @@ int main(kapi_t *kapi, int argc, char **argv) {
                 // Key pressed - add to input buffer (data1 is int, preserves special keys)
                 input_push(data1);
 
+                // Reset cursor blink to visible on keypress
+                cursor_visible = 1;
+                last_blink_tick = api->get_uptime_ticks();
+
                 // If we're scrolled back and user types, jump to bottom
                 if (scroll_offset > 0) {
                     scroll_to_bottom();
@@ -469,6 +491,9 @@ int main(kapi_t *kapi, int argc, char **argv) {
                 redraw_screen();
             }
         }
+
+        // Update cursor blink
+        update_cursor_blink();
 
         // Yield to other processes
         api->yield();

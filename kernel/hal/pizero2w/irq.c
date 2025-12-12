@@ -12,6 +12,7 @@
 #include "../hal.h"
 #include "../../printf.h"
 #include "../../string.h"
+#include "../../console.h"
 
 void led_init(void);
 void led_toggle(void);
@@ -251,6 +252,11 @@ static void on_timer_tick(void) {
     // Poll USB keyboard every tick (10ms)
     // This is much more efficient than SOF-based polling (1000 IRQs/sec)
     hal_usb_keyboard_tick();
+
+    // Blink console cursor (every 50 ticks = 500ms at 100Hz)
+    if ((tick_count % 50) == 0) {
+        console_blink_cursor();
+    }
 
     // Debug: check USB interrupt status every second
     if (tick_count % 100 == 0) {

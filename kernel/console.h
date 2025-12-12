@@ -20,6 +20,9 @@ void console_clear(void);
 // Cursor
 void console_set_cursor(int row, int col);
 void console_get_cursor(int *row, int *col);
+void console_blink_cursor(void);
+void console_set_cursor_enabled(int enabled);
+void console_show_cursor(void);
 
 // Colors
 void console_set_color(uint32_t fg, uint32_t bg);

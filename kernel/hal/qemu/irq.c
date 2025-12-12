@@ -9,6 +9,7 @@
 #include "../../printf.h"
 #include "../../irq.h"
 #include "../../virtio_sound.h"
+#include "../../console.h"
 
 // QEMU virt machine GIC addresses
 #define GICD_BASE   0x08000000UL  // Distributor
@@ -61,6 +62,11 @@ static void timer_handler(void) {
 
     // Pump audio if playing
     virtio_sound_pump();
+
+    // Blink console cursor (every 50 ticks = 500ms at 100Hz)
+    if ((timer_ticks % 50) == 0) {
+        console_blink_cursor();
+    }
 
     // Reload timer
     asm volatile("msr cntp_tval_el0, %0" :: "r"(timer_interval_ticks));
