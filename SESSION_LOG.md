@@ -1055,3 +1055,53 @@
   - `kernel/printf.c` - PRINTF_UART flag support
   - `Makefile` - PRINTF option, `run-pi` target
 - **Achievement**: Can now debug USB driver in QEMU with full serial output!
+
+### Session 43
+- **USB KEYBOARD WORKING IN QEMU!**
+- **Root cause found:** QEMU's DWC2 emulation only supports DMA mode, not slave mode
+  - Slave mode = CPU manually reads/writes FIFOs
+  - DMA mode = Controller reads/writes memory directly
+  - Our original driver used slave mode, QEMU ignored FIFO operations
+- **DMA mode implementation:**
+  - Enabled `GAHBCFG_DMA_EN` (bit 5) in AHB configuration
+  - Added 32-byte aligned DMA buffers for transfers
+  - Set `HCDMA(ch)` register to bus address instead of writing to `FIFO(ch)`
+  - Removed all FIFO read/write code
+  - Simplified wait logic (no more RXFLVL polling)
+- **USB hub support added:**
+  - QEMU raspi3b has virtual 8-port root hub
+  - Keyboard connected behind hub, not directly to root
+  - Added hub descriptor fetching
+  - Added port power on, status check, reset sequence
+  - Recursive enumeration through hub ports
+  - Found keyboard on hub port 1, address 2
+- **HID keyboard interrupt transfers:**
+  - Implemented interrupt IN transfers using DMA
+  - 8-byte HID boot keyboard reports working
+  - Data toggle (DATA0/DATA1) alternation between transfers
+  - NAK handling (no data available, not an error)
+- **HID report parsing:**
+  - Created `kernel/hal/pizero2w/keyboard.c`
+  - USB HID scancodes to ASCII conversion
+  - Modifier key support (Shift for uppercase/symbols)
+  - Ctrl+key combinations (Ctrl+A = 1, etc.)
+  - Arrow keys and special keys
+- **Keyboard integration:**
+  - Modified `kernel/keyboard.c` to fall back to HAL when no virtio keyboard
+  - `keyboard_getc()` calls `hal_keyboard_getc()` when `kbd_base == NULL`
+  - Works seamlessly - shell accepts keyboard input!
+- **Debug output improvements:**
+  - Added debug levels (0=errors, 1=key events, 2=verbose)
+  - `usb_info()` for important status, `usb_debug()` for verbose
+  - Much cleaner output for real hardware testing
+- **Real Pi status:**
+  - USB enumeration works (hub found, keyboard found)
+  - Interrupt transfers return 0 bytes (NAK)
+  - Likely cache coherency issue - QEMU doesn't emulate caches
+  - DMA buffer might need uncached memory or cache flush/invalidate
+  - Deferred to future session
+- **Files changed:**
+  - `kernel/hal/pizero2w/usb.c` - DMA mode, hub support, interrupt transfers
+  - `kernel/hal/pizero2w/keyboard.c` - New file, USB HID to ASCII
+  - `kernel/keyboard.c` - HAL fallback for Pi
+- **Achievement**: USB keyboard fully working in QEMU raspi3b! Type in shell!
