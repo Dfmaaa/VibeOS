@@ -164,6 +164,23 @@ void kernel_main(void) {
     }
 #endif
 
+#ifdef PI_DEBUG_MODE
+    // Debug mode: skip all non-essential init and run USB debug loop
+    printf("\n");
+    printf("[DEBUG] ==========================================\n");
+    printf("[DEBUG] Pi USB Debug Mode - Minimal Boot\n");
+    printf("[DEBUG] Skipping: SD, VFS, TTF, shell\n");
+    printf("[DEBUG] ==========================================\n");
+    printf("\n");
+
+    // Enable interrupts so USB IRQ-driven keyboard works
+    printf("[DEBUG] Enabling interrupts for USB...\n");
+    hal_irq_enable();
+    printf("[DEBUG] Interrupts enabled!\n");
+
+    usb_keyboard_debug_loop();  // Never returns
+#endif
+
     // Initialize block device (for persistent storage)
 #ifdef TARGET_QEMU
     virtio_blk_init();

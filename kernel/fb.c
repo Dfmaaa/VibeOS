@@ -19,8 +19,8 @@ uint32_t *fb_base = NULL;
 int fb_init(void) {
     // Note: Don't use printf here - console isn't initialized yet!
 
-    // Call platform-specific init
-    if (hal_fb_init(1024, 768) < 0) {
+    // Call platform-specific init with 1080p resolution
+    if (hal_fb_init(1920, 1080) < 0) {
         return -1;
     }
 

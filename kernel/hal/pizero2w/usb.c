@@ -402,6 +402,10 @@ static struct {
     int keyboard_interval;      // Polling interval
 } usb_state = {0};
 
+// Forward declarations for interrupt-driven keyboard
+static void usb_irq_handler(void);
+void usb_start_keyboard_transfer(void);
+
 // Mailbox buffer (16-byte aligned)
 static volatile uint32_t __attribute__((aligned(16))) mbox_buf[36];
 
@@ -684,9 +688,8 @@ static int usb_init_host(void) {
     HFIR = 60000;
     dsb();
 
-    // Configure AHB for DMA mode
+    // Configure AHB for DMA mode (interrupts enabled later after handler registered)
     // QEMU's DWC2 emulation only supports DMA mode, not slave mode
-    // DMA_EN = bit 5, also set AHB_SINGLE for single-beat AHB bursts
     GAHBCFG = GAHBCFG_DMA_EN;
     dsb();
     usb_debug("[USB] DMA mode enabled (GAHBCFG=%08x)\n", GAHBCFG);
@@ -1509,6 +1512,33 @@ int hal_usb_init(void) {
     if (usb_state.keyboard_addr) {
         printf("[USB] Keyboard at address %d, endpoint %d\n",
                usb_state.keyboard_addr, usb_state.keyboard_ep);
+
+        // Register USB interrupt handler for keyboard
+        extern void hal_irq_register_handler(uint32_t irq, void (*handler)(void));
+        extern void hal_irq_enable_irq(uint32_t irq);
+
+        #define IRQ_VC_USB  17  // VideoCore bank1 IRQ 9
+
+        // Clear any pending interrupts first
+        GINTSTS = 0xFFFFFFFF;
+        dsb();
+
+        // Enable host channel 1 interrupts (keyboard channel)
+        HAINTMSK = (1 << 1);
+        dsb();
+
+        // Register handler with Pi interrupt controller
+        hal_irq_register_handler(IRQ_VC_USB, usb_irq_handler);
+        hal_irq_enable_irq(IRQ_VC_USB);
+
+        // NOW enable global interrupts in DWC2 (handler is ready)
+        GAHBCFG = GAHBCFG_DMA_EN | GAHBCFG_GLBL_INTR_EN;
+        dsb();
+
+        printf("[USB] USB IRQ %d registered for keyboard\n", IRQ_VC_USB);
+
+        // Start first keyboard transfer
+        usb_start_keyboard_transfer();
     }
 
     return 0;
@@ -1520,7 +1550,138 @@ static uint8_t __attribute__((aligned(32))) intr_dma_buffer[64];
 // Data toggle for interrupt endpoint
 static int keyboard_data_toggle = 0;
 
-// Interrupt transfer for HID reports
+#ifdef PI_DEBUG_MODE
+// Debug counters for USB polling
+static int usb_poll_count = 0;
+static int usb_nak_count = 0;
+static int usb_timeout_count = 0;
+static int usb_success_count = 0;
+static int usb_error_count = 0;
+#endif
+
+// Interrupt-driven keyboard state
+static volatile uint8_t kbd_report_buf[8];
+static volatile int kbd_report_ready = 0;
+static volatile int kbd_transfer_pending = 0;
+
+// USB IRQ handler - called when DWC2 generates an interrupt
+static void usb_irq_handler(void) {
+    uint32_t gintsts = GINTSTS;
+
+    // Port interrupt - MUST be handled by reading/writing HPRT0
+    // PRTINT cannot be cleared by writing GINTSTS alone!
+    if (gintsts & GINTSTS_PRTINT) {
+        uint32_t hprt = HPRT0;
+        // Clear W1C bits in HPRT0 (but preserve PRTENA which is also W1C!)
+        // W1C bits: PRTCONNDET(1), PRTENCHNG(3), PRTOVRCURRCHNG(5)
+        // We must NOT write 1 to PRTENA(2) or it will disable the port!
+        uint32_t hprt_clear = hprt & ~(HPRT0_PRTENA);  // Preserve everything except PRTENA
+        hprt_clear &= (HPRT0_PRTCONNDET | HPRT0_PRTENCHNG | HPRT0_PRTOVRCURRCHNG);  // Only W1C bits
+        if (hprt_clear) {
+            HPRT0 = hprt_clear;
+            dsb();
+        }
+    }
+
+    // Host channel interrupt
+    if (gintsts & GINTSTS_HCHINT) {
+        uint32_t haint = HAINT;
+
+        // Clear ALL channels that have interrupts pending
+        for (int ch = 0; ch < 16; ch++) {
+            if (haint & (1 << ch)) {
+                uint32_t hcint = HCINT(ch);
+
+                // Channel 1 = keyboard interrupt transfers
+                if (ch == 1) {
+                    if (hcint & HCINT_XFERCOMPL) {
+                        // Transfer complete - copy data from DMA buffer
+                        keyboard_data_toggle = !keyboard_data_toggle;
+                        uint32_t remaining = HCTSIZ(1) & HCTSIZ_XFERSIZE_MASK;
+                        int received = 8 - remaining;
+                        if (received > 0) {
+                            memcpy((void*)kbd_report_buf, intr_dma_buffer, 8);
+                            kbd_report_ready = 1;
+                        }
+                    }
+                    else if ((hcint & HCINT_CHHLTD) && (hcint & HCINT_ACK)) {
+                        // Got ACK with halt - data received
+                        keyboard_data_toggle = !keyboard_data_toggle;
+                        uint32_t remaining = HCTSIZ(1) & HCTSIZ_XFERSIZE_MASK;
+                        int received = 8 - remaining;
+                        if (received > 0) {
+                            memcpy((void*)kbd_report_buf, intr_dma_buffer, 8);
+                            kbd_report_ready = 1;
+                        }
+                    }
+                    // NAK = no data available (normal)
+                    // Errors = clear and allow restart
+                    kbd_transfer_pending = 0;  // Allow new transfer to start
+                }
+
+                // Clear this channel's interrupts
+                HCINT(ch) = 0xFFFFFFFF;
+            }
+        }
+    }
+
+    // Clear global interrupt status (write-1-to-clear)
+    // Note: PRTINT is cleared by handling HPRT0 above, not by this write
+    // Some bits like CURMODE, RXFLVL, NPTXFE are read-only status
+    GINTSTS = gintsts;
+}
+
+// Start a non-blocking keyboard transfer
+void usb_start_keyboard_transfer(void) {
+    if (kbd_transfer_pending) return;  // Already in progress
+    if (usb_state.keyboard_addr == 0) return;  // No keyboard detected
+
+    kbd_transfer_pending = 1;
+
+    int ch = 1;
+    int ep = usb_state.keyboard_ep;
+    int addr = usb_state.keyboard_addr;
+
+    // Halt channel if somehow still active
+    usb_halt_channel(ch);
+
+    // Configure channel for interrupt IN endpoint
+    uint32_t mps = 64;  // Full speed max
+    uint32_t hcchar = (mps & HCCHAR_MPS_MASK) |
+                      (ep << HCCHAR_EPNUM_SHIFT) |
+                      HCCHAR_EPDIR |                              // IN direction
+                      (HCCHAR_EPTYPE_INTR << HCCHAR_EPTYPE_SHIFT) |
+                      (addr << HCCHAR_DEVADDR_SHIFT) |
+                      (1 << HCCHAR_MC_SHIFT);
+
+    // Odd/even frame scheduling
+    uint32_t fnum = HFNUM & 0xFFFF;
+    if (fnum & 1) {
+        hcchar |= HCCHAR_ODDFRM;
+    }
+
+    // Clear DMA buffer
+    memset(intr_dma_buffer, 0, 8);
+    dsb();
+
+    // Configure channel
+    HCINT(ch) = 0xFFFFFFFF;
+    HCINTMSK(ch) = HCINT_XFERCOMPL | HCINT_CHHLTD | HCINT_NAK |
+                   HCINT_ACK | HCINT_XACTERR | HCINT_BBLERR | HCINT_FRMOVRUN;
+    HCDMA(ch) = arm_to_bus(intr_dma_buffer);
+    HCCHAR(ch) = hcchar;
+
+    // Transfer size: 8 bytes, 1 packet, DATA0/DATA1 toggle
+    uint32_t pid = keyboard_data_toggle ? HCTSIZ_PID_DATA1 : HCTSIZ_PID_DATA0;
+    HCTSIZ(ch) = 8 | (1 << HCTSIZ_PKTCNT_SHIFT) | (pid << HCTSIZ_PID_SHIFT);
+    dsb();
+
+    // Enable channel - transfer starts, interrupt fires on completion
+    HCCHAR(ch) = hcchar | HCCHAR_CHENA;
+    dsb();
+}
+
+// Interrupt transfer for HID reports (legacy polling version - keep for control transfers)
 static int usb_interrupt_transfer(int device_addr, int ep, void *data, int data_len, int dev_speed) {
     int ch = 1;  // Use channel 1 for interrupt transfers
 
@@ -1591,6 +1752,9 @@ static int usb_interrupt_transfer(int device_addr, int ep, void *data, int data_
             if (received > 0) {
                 memcpy(data, intr_dma_buffer, received);
             }
+#ifdef PI_DEBUG_MODE
+            usb_success_count++;
+#endif
             return received;
         }
         if (hcint & HCINT_CHHLTD) {
@@ -1604,23 +1768,45 @@ static int usb_interrupt_transfer(int device_addr, int ep, void *data, int data_
                 if (received > 0) {
                     memcpy(data, intr_dma_buffer, received);
                 }
+#ifdef PI_DEBUG_MODE
+                usb_success_count++;
+#endif
                 return received;
             }
             if (hcint & HCINT_NAK) {
                 // NAK = no data available, not an error
                 HCINT(ch) = 0xFFFFFFFF;
+#ifdef PI_DEBUG_MODE
+                usb_nak_count++;
+#endif
                 return 0;
             }
             // Other halt reason
+#ifdef PI_DEBUG_MODE
+            usb_error_count++;
+            printf("[USB] HCINT error: 0x%08x\n", hcint);
+#endif
             HCINT(ch) = 0xFFFFFFFF;
             return -1;
         }
         if (hcint & HCINT_NAK) {
             // NAK without halt - just means no data
             HCINT(ch) = 0xFFFFFFFF;
+#ifdef PI_DEBUG_MODE
+            usb_nak_count++;
+#endif
             return 0;
         }
         if (hcint & (HCINT_STALL | HCINT_XACTERR | HCINT_BBLERR | HCINT_AHBERR)) {
+#ifdef PI_DEBUG_MODE
+            usb_error_count++;
+            printf("[USB] Error HCINT: 0x%08x (STALL=%d XACTERR=%d BBLERR=%d AHBERR=%d)\n",
+                   hcint,
+                   (hcint & HCINT_STALL) ? 1 : 0,
+                   (hcint & HCINT_XACTERR) ? 1 : 0,
+                   (hcint & HCINT_BBLERR) ? 1 : 0,
+                   (hcint & HCINT_AHBERR) ? 1 : 0);
+#endif
             HCINT(ch) = 0xFFFFFFFF;
             return -1;
         }
@@ -1629,11 +1815,14 @@ static int usb_interrupt_transfer(int device_addr, int ep, void *data, int data_
     }
 
     // Timeout - halt channel
+#ifdef PI_DEBUG_MODE
+    usb_timeout_count++;
+#endif
     usb_halt_channel(ch);
     return -1;
 }
 
-// Poll keyboard for HID report
+// Poll keyboard for HID report - now interrupt-driven
 int hal_usb_keyboard_poll(uint8_t *report, int report_len) {
     if (!usb_state.initialized || !usb_state.device_connected) {
         return -1;
@@ -1644,21 +1833,103 @@ int hal_usb_keyboard_poll(uint8_t *report, int report_len) {
         return -1;
     }
 
-    // Find device to get speed
-    int dev_speed = 1;  // Default Full Speed
-    for (int i = 0; i < usb_state.num_devices; i++) {
-        if (usb_state.devices[i].address == usb_state.keyboard_addr) {
-            dev_speed = usb_state.devices[i].speed;
-            break;
+    // Start a new transfer if none is pending
+    usb_start_keyboard_transfer();
+
+    // Check if we have data from the ISR
+    if (kbd_report_ready) {
+        kbd_report_ready = 0;
+        int len = (report_len < 8) ? report_len : 8;
+        memcpy(report, (void*)kbd_report_buf, len);
+        return len;
+    }
+
+    return 0;  // No data yet (equivalent to NAK)
+}
+
+#ifdef PI_DEBUG_MODE
+// USB Keyboard Debug Loop - for debugging USB keyboard on real hardware
+void usb_keyboard_debug_loop(void) {
+    printf("[DEBUG] USB Keyboard Debug Loop\n");
+    printf("[DEBUG] Keyboard: addr=%d EP=%d MPS=%d\n",
+           usb_state.keyboard_addr, usb_state.keyboard_ep,
+           usb_state.keyboard_mps);
+
+    if (usb_state.keyboard_addr == 0) {
+        printf("[DEBUG] ERROR: No keyboard detected!\n");
+        printf("[DEBUG] Hanging...\n");
+        while (1) {
+            asm volatile("wfi");
         }
     }
 
-    // Do interrupt transfer
-    int len = report_len;
-    if (len > usb_state.keyboard_mps) {
-        len = usb_state.keyboard_mps;
-    }
+    printf("[DEBUG] Press keys - watching for HID reports...\n");
+    printf("[DEBUG] Legend: . = poll, [HID] = data received\n\n");
 
-    return usb_interrupt_transfer(usb_state.keyboard_addr, usb_state.keyboard_ep,
-                                  report, len, dev_speed);
+    uint8_t report[8];
+    uint8_t prev[8] = {0};
+    int loop = 0;
+
+    while (1) {
+        usb_poll_count++;
+        int ret = hal_usb_keyboard_poll(report, 8);
+        loop++;
+
+        // Print status every 1000 polls
+        if (loop % 1000 == 0) {
+            printf(".");  // Show we're alive
+        }
+
+        // Print detailed stats every 10000 polls
+        if (loop % 10000 == 0) {
+            printf("\n[STATS] Poll=%d NAK=%d TO=%d OK=%d ERR=%d\n",
+                   usb_poll_count, usb_nak_count, usb_timeout_count,
+                   usb_success_count, usb_error_count);
+        }
+
+        if (ret > 0) {
+            // Got data! Print hex dump
+            printf("\n[HID] Got %d bytes: ", ret);
+            for (int i = 0; i < 8; i++) {
+                printf("%02x ", report[i]);
+            }
+            printf("\n");
+
+            // Decode modifiers
+            if (report[0]) {
+                printf("  Mods: ");
+                if (report[0] & 0x22) printf("SHIFT ");
+                if (report[0] & 0x11) printf("CTRL ");
+                if (report[0] & 0x44) printf("ALT ");
+                if (report[0] & 0x88) printf("GUI ");
+                printf("\n");
+            }
+
+            // Show keycodes
+            for (int i = 2; i < 8; i++) {
+                if (report[i]) {
+                    printf("  Key[%d]: 0x%02x", i-2, report[i]);
+                    // Common HID codes
+                    if (report[i] >= 0x04 && report[i] <= 0x1D) {
+                        printf(" (%c)", 'a' + report[i] - 0x04);
+                    } else if (report[i] == 0x28) {
+                        printf(" (Enter)");
+                    } else if (report[i] == 0x2C) {
+                        printf(" (Space)");
+                    } else if (report[i] == 0x2A) {
+                        printf(" (Backspace)");
+                    }
+                    printf("\n");
+                }
+            }
+            memcpy(prev, report, 8);
+        } else if (ret < 0) {
+            printf("\n[USB] Transfer error: ret=%d\n", ret);
+        }
+        // ret == 0 means NAK (no data) - normal, don't print
+
+        // Small delay between polls (roughly 10ms)
+        for (volatile int i = 0; i < 100000; i++);
+    }
 }
+#endif
