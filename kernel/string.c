@@ -8,6 +8,22 @@
 void *memcpy(void *dest, const void *src, size_t n) {
     uint8_t *d = (uint8_t *)dest;
     const uint8_t *s = (const uint8_t *)src;
+
+    // If both aligned to 8 bytes, use 64-bit copies
+    if (((uintptr_t)d & 7) == 0 && ((uintptr_t)s & 7) == 0) {
+        uint64_t *d64 = (uint64_t *)d;
+        const uint64_t *s64 = (const uint64_t *)s;
+        size_t n64 = n / 8;
+        for (size_t i = 0; i < n64; i++) {
+            d64[i] = s64[i];
+        }
+        // Handle remainder
+        d = (uint8_t *)(d64 + n64);
+        s = (const uint8_t *)(s64 + n64);
+        n = n & 7;
+    }
+
+    // Byte copy for unaligned or remainder
     for (size_t i = 0; i < n; i++) {
         d[i] = s[i];
     }
@@ -16,8 +32,54 @@ void *memcpy(void *dest, const void *src, size_t n) {
 
 void *memset(void *s, int c, size_t n) {
     uint8_t *p = (uint8_t *)s;
+    uint8_t byte = (uint8_t)c;
+
+    // If aligned to 8 bytes, use 64-bit stores
+    if (((uintptr_t)p & 7) == 0 && n >= 8) {
+        // Build 64-bit pattern from byte
+        uint64_t pattern = byte;
+        pattern |= pattern << 8;
+        pattern |= pattern << 16;
+        pattern |= pattern << 32;
+
+        uint64_t *p64 = (uint64_t *)p;
+        size_t n64 = n / 8;
+        for (size_t i = 0; i < n64; i++) {
+            p64[i] = pattern;
+        }
+        // Handle remainder
+        p = (uint8_t *)(p64 + n64);
+        n = n & 7;
+    }
+
+    // Byte set for unaligned or remainder
     for (size_t i = 0; i < n; i++) {
-        p[i] = (uint8_t)c;
+        p[i] = byte;
+    }
+    return s;
+}
+
+// Fill memory with 32-bit pattern (for pixel fills)
+void *memset32(void *s, uint32_t val, size_t count) {
+    uint32_t *p = (uint32_t *)s;
+
+    // If aligned to 8 bytes, use 64-bit stores (2 pixels at a time)
+    if (((uintptr_t)p & 7) == 0 && count >= 2) {
+        uint64_t pattern = ((uint64_t)val << 32) | val;
+        uint64_t *p64 = (uint64_t *)p;
+        size_t n64 = count / 2;
+        for (size_t i = 0; i < n64; i++) {
+            p64[i] = pattern;
+        }
+        // Handle odd pixel
+        if (count & 1) {
+            p[count - 1] = val;
+        }
+    } else {
+        // Unaligned or small - 32-bit stores
+        for (size_t i = 0; i < count; i++) {
+            p[i] = val;
+        }
     }
     return s;
 }
@@ -26,15 +88,32 @@ void *memmove(void *dest, const void *src, size_t n) {
     uint8_t *d = (uint8_t *)dest;
     const uint8_t *s = (const uint8_t *)src;
 
-    if (d < s) {
-        // Copy forwards
-        for (size_t i = 0; i < n; i++) {
-            d[i] = s[i];
-        }
+    if (d < s || d >= s + n) {
+        // No overlap or dest before src - use fast memcpy
+        return memcpy(dest, src, n);
     } else if (d > s) {
-        // Copy backwards to handle overlap
-        for (size_t i = n; i > 0; i--) {
-            d[i - 1] = s[i - 1];
+        // Overlap with dest after src - copy backwards
+        // Check if we can use 64-bit copies (both ends aligned)
+        if (((uintptr_t)(d + n) & 7) == 0 && ((uintptr_t)(s + n) & 7) == 0) {
+            size_t n64 = n / 8;
+            size_t rem = n & 7;
+
+            // Copy remainder bytes first (at the end)
+            for (size_t i = 0; i < rem; i++) {
+                d[n - 1 - i] = s[n - 1 - i];
+            }
+
+            // Copy 64-bit chunks backwards
+            uint64_t *d64 = (uint64_t *)d;
+            const uint64_t *s64 = (const uint64_t *)s;
+            for (size_t i = n64; i > 0; i--) {
+                d64[i - 1] = s64[i - 1];
+            }
+        } else {
+            // Unaligned - byte copy backwards
+            for (size_t i = n; i > 0; i--) {
+                d[i - 1] = s[i - 1];
+            }
         }
     }
     return dest;

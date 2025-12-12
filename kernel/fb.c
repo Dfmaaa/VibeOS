@@ -48,31 +48,43 @@ void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color) {
 }
 
 void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
-    for (uint32_t row = y; row < y + h && row < fb_height; row++) {
-        for (uint32_t col = x; col < x + w && col < fb_width; col++) {
-            fb_base[row * fb_width + col] = color;
-        }
+    // Clip to screen bounds
+    if (x >= fb_width || y >= fb_height) return;
+    if (x + w > fb_width) w = fb_width - x;
+    if (y + h > fb_height) h = fb_height - y;
+
+    // Fill row by row using memset32
+    for (uint32_t row = y; row < y + h; row++) {
+        memset32(&fb_base[row * fb_width + x], color, w);
     }
 }
 
 void fb_clear(uint32_t color) {
-    for (uint32_t i = 0; i < fb_width * fb_height; i++) {
-        fb_base[i] = color;
-    }
+    memset32(fb_base, color, fb_width * fb_height);
 }
 
 // Include font data
 #include "font.h"
 
 void fb_draw_char(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg) {
+    // Quick bounds check for entire character
+    if (x + FONT_WIDTH > fb_width || y + FONT_HEIGHT > fb_height) return;
+
     const uint8_t *glyph = font_data[(uint8_t)c];
+    uint32_t *row_ptr = &fb_base[y * fb_width + x];
 
     for (int row = 0; row < FONT_HEIGHT; row++) {
         uint8_t bits = glyph[row];
-        for (int col = 0; col < FONT_WIDTH; col++) {
-            uint32_t color = (bits & (0x80 >> col)) ? fg : bg;
-            fb_put_pixel(x + col, y + row, color);
-        }
+        // Unroll the 8-pixel row for speed
+        row_ptr[0] = (bits & 0x80) ? fg : bg;
+        row_ptr[1] = (bits & 0x40) ? fg : bg;
+        row_ptr[2] = (bits & 0x20) ? fg : bg;
+        row_ptr[3] = (bits & 0x10) ? fg : bg;
+        row_ptr[4] = (bits & 0x08) ? fg : bg;
+        row_ptr[5] = (bits & 0x04) ? fg : bg;
+        row_ptr[6] = (bits & 0x02) ? fg : bg;
+        row_ptr[7] = (bits & 0x01) ? fg : bg;
+        row_ptr += fb_width;
     }
 }
 

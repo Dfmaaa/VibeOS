@@ -55,15 +55,11 @@ static void scroll_up(void) {
     uint32_t line_pixels = fb_width * FONT_HEIGHT;
     uint32_t total_pixels = fb_width * fb_height;
 
-    // Copy pixels up
-    for (uint32_t i = 0; i < total_pixels - line_pixels; i++) {
-        fb_base[i] = fb_base[i + line_pixels];
-    }
+    // Copy pixels up using optimized memmove
+    memmove(fb_base, fb_base + line_pixels, (total_pixels - line_pixels) * sizeof(uint32_t));
 
-    // Clear the bottom line
-    for (uint32_t i = total_pixels - line_pixels; i < total_pixels; i++) {
-        fb_base[i] = bg_color;
-    }
+    // Clear the bottom line using optimized memset32
+    memset32(fb_base + (total_pixels - line_pixels), bg_color, line_pixels);
 }
 
 static void newline(void) {
