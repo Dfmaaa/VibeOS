@@ -1166,3 +1166,28 @@ Session 44: USB Keyboard Working on Real Pi Hardware!
   - kernel/hal/hal.h - Added hal_usb_keyboard_tick()
 
   USB keyboard now works on real Raspberry Pi Zero 2W hardware!
+
+### Session 45
+- **USB Driver Refactor** - Split 2256-line monolithic driver into maintainable modules
+- **Problem:** USB driver was too large and had reliability issues
+  - Printf calls in ISR causing timing problems
+  - Single keyboard buffer could drop fast keypresses
+  - No recovery from stuck transfers
+- **Refactored into `kernel/hal/pizero2w/usb/` directory:**
+  - `dwc2_regs.h` (~200 lines) - Register definitions
+  - `usb_types.h` (~180 lines) - USB descriptors and structs
+  - `dwc2_core.c/h` (~400 lines) - PHY, reset, cache ops, mailbox, port control
+  - `usb_transfer.c/h` (~290 lines) - Control transfers, DMA handling
+  - `usb_enum.c/h` (~380 lines) - Device enumeration, hub support
+  - `usb_hid.c/h` (~340 lines) - Keyboard ISR, polling, ring buffer
+  - `usb.c` (~200 lines) - Init wrapper
+- **New reliability features:**
+  1. **Ring buffer** (16 reports) - Fast typing won't drop keys
+  2. **Debug counters** - No printf in ISR, safe atomic counters
+  3. **Watchdog** - Recovers stuck transfers after 50ms timeout
+  4. **`usbstats` command** - Shows IRQ/transfer/error statistics
+- **Files changed:**
+  - `kernel/hal/pizero2w/usb/` - New directory with split USB driver
+  - `kernel/shell.c` - Added `usbstats` recovery command
+  - `Makefile` - Added USB subdirectory compilation rules
+- **Stats output:** `[USB-STATS] IRQ=X KBD=X data=X NAK=X err=X restart=X port=X watchdog=X`

@@ -64,6 +64,7 @@ endif
 KERNEL_C_SRCS = $(wildcard $(KERNEL_DIR)/*.c)
 KERNEL_S_SRCS = $(wildcard $(KERNEL_DIR)/*.S)
 HAL_C_SRCS = $(wildcard $(HAL_DIR)/$(HAL_PLATFORM)/*.c)
+HAL_USB_C_SRCS = $(wildcard $(HAL_DIR)/$(HAL_PLATFORM)/usb/*.c)
 
 # Userspace programs to build and install to disk
 # Note: browser is handled specially (multi-file build from user/bin/browser/)
@@ -75,7 +76,8 @@ BOOT_OBJ = $(BUILD_DIR)/boot.o
 KERNEL_C_OBJS = $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(KERNEL_C_SRCS))
 KERNEL_S_OBJS = $(patsubst $(KERNEL_DIR)/%.S,$(BUILD_DIR)/%.o,$(KERNEL_S_SRCS))
 HAL_OBJS = $(patsubst $(HAL_DIR)/$(HAL_PLATFORM)/%.c,$(BUILD_DIR)/hal_%.o,$(HAL_C_SRCS))
-KERNEL_OBJS = $(KERNEL_C_OBJS) $(KERNEL_S_OBJS) $(HAL_OBJS)
+HAL_USB_OBJS = $(patsubst $(HAL_DIR)/$(HAL_PLATFORM)/usb/%.c,$(BUILD_DIR)/hal_usb_%.o,$(HAL_USB_C_SRCS))
+KERNEL_OBJS = $(KERNEL_C_OBJS) $(KERNEL_S_OBJS) $(HAL_OBJS) $(HAL_USB_OBJS)
 
 # Userspace ELF files (installed to disk, NOT embedded in kernel)
 USER_ELFS = $(patsubst %,$(USER_BUILD_DIR)/%.elf,$(USER_PROGS))
@@ -153,6 +155,10 @@ $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c | $(BUILD_DIR)
 
 # HAL C objects
 $(BUILD_DIR)/hal_%.o: $(HAL_DIR)/$(HAL_PLATFORM)/%.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# HAL USB subdirectory objects
+$(BUILD_DIR)/hal_usb_%.o: $(HAL_DIR)/$(HAL_PLATFORM)/usb/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Special rule for TLS (includes huge third-party library)

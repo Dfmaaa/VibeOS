@@ -15,6 +15,10 @@
 #include "process.h"
 #include <stddef.h>
 
+#ifdef TARGET_PI
+#include "hal/pizero2w/usb/usb_hid.h"
+#endif
+
 void shell_init(void) {
     // Nothing to initialize
 }
@@ -82,8 +86,12 @@ void shell_run(void) {
             process_exec("/bin/vibesh");
         } else if (strcmp(cmd, "reboot") == 0) {
             console_puts("Rebooting not implemented. Please close QEMU.\n");
+#ifdef TARGET_PI
+        } else if (strcmp(cmd, "usbstats") == 0) {
+            usb_hid_print_stats();
+#endif
         } else if (pos > 0) {
-            console_puts("Unknown command. Try 'gui', 'vibesh', or 'reboot'.\n");
+            console_puts("Unknown command. Try 'gui', 'vibesh', 'usbstats', or 'reboot'.\n");
         }
     }
 }
