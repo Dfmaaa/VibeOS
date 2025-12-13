@@ -487,6 +487,9 @@ int main(kapi_t *kapi, int argc, char **argv) {
 
     api = kapi;
 
+    // Disable text cursor for game
+    api->set_cursor_enabled(0);
+
     init_game();
 
     int drop_counter = 0;
@@ -525,6 +528,7 @@ int main(kapi_t *kapi, int argc, char **argv) {
 
     api->clear();
     api->set_color(COLOR_WHITE, COLOR_BLACK);
+    api->set_cursor_enabled(1);  // Re-enable cursor
 
     return score;
 }

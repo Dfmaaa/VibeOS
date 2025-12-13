@@ -194,6 +194,7 @@ void kapi_init(void) {
     kapi.set_color = kapi_set_color;
     kapi.clear = console_clear;
     kapi.set_cursor = console_set_cursor;
+    kapi.set_cursor_enabled = console_set_cursor_enabled;
     kapi.print_int = kapi_print_int;
     kapi.print_hex = kapi_print_hex;
 

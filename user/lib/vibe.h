@@ -27,6 +27,7 @@ typedef struct kapi {
     void (*set_color)(uint32_t fg, uint32_t bg);
     void (*clear)(void);
     void (*set_cursor)(int row, int col);
+    void (*set_cursor_enabled)(int enabled);  // Enable/disable text cursor
     void (*print_int)(int n);
     void (*print_hex)(uint32_t n);
 

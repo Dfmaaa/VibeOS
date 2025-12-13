@@ -27,6 +27,7 @@ typedef struct {
     void (*set_color)(uint32_t fg, uint32_t bg);
     void (*clear)(void);             // Clear screen
     void (*set_cursor)(int row, int col);  // Set cursor position
+    void (*set_cursor_enabled)(int enabled);  // Enable/disable text cursor
     void (*print_int)(int n);        // Print integer
     void (*print_hex)(uint32_t n);   // Print hex
 
