@@ -176,6 +176,19 @@ typedef struct {
     void (*led_off)(void);
     void (*led_toggle)(void);
 
+    // Process control
+    int (*kill_process)(int pid);                                // Kill a process by PID
+
+    // CPU info
+    const char *(*get_cpu_name)(void);                           // CPU model name
+    uint32_t (*get_cpu_freq_mhz)(void);                          // CPU frequency in MHz
+    int (*get_cpu_cores)(void);                                  // Number of CPU cores
+
+    // USB device list
+    int (*usb_device_count)(void);                               // Number of USB devices
+    int (*usb_device_info)(int idx, uint16_t *vid, uint16_t *pid,
+                           char *name, int name_len);            // Get USB device info
+
 } kapi_t;
 
 // TTF font style flags (for ttf_get_glyph)

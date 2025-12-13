@@ -414,3 +414,48 @@ void process_schedule_from_irq(void) {
     // Call the normal scheduler
     process_schedule();
 }
+
+// Kill a process by PID
+int process_kill(int pid) {
+    // Don't allow killing kernel (pid would be invalid anyway)
+    if (pid <= 0) {
+        printf("[PROC] Cannot kill pid %d\n", pid);
+        return -1;
+    }
+
+    // Find the process
+    int slot = -1;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (proc_table[i].pid == pid && proc_table[i].state != PROC_STATE_FREE) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot < 0) {
+        printf("[PROC] Process %d not found\n", pid);
+        return -1;
+    }
+
+    process_t *proc = &proc_table[slot];
+
+    // Don't allow killing the current process this way - use exit() instead
+    if (slot == current_pid) {
+        printf("[PROC] Cannot kill current process (use exit)\n");
+        return -1;
+    }
+
+    printf("[PROC] Killing process '%s' (pid %d)\n", proc->name, pid);
+
+    // Free the process memory
+    if (proc->stack_base) {
+        free(proc->stack_base);
+        proc->stack_base = NULL;
+    }
+
+    // Mark slot as free
+    proc->state = PROC_STATE_FREE;
+    proc->pid = 0;
+
+    return 0;
+}

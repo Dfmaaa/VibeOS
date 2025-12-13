@@ -337,4 +337,16 @@ void kapi_init(void) {
     kapi.led_on = hal_led_on;
     kapi.led_off = hal_led_off;
     kapi.led_toggle = hal_led_toggle;
+
+    // Process control
+    kapi.kill_process = process_kill;
+
+    // CPU info
+    kapi.get_cpu_name = hal_get_cpu_name;
+    kapi.get_cpu_freq_mhz = hal_get_cpu_freq_mhz;
+    kapi.get_cpu_cores = hal_get_cpu_cores;
+
+    // USB device list
+    kapi.usb_device_count = hal_usb_get_device_count;
+    kapi.usb_device_info = hal_usb_get_device_info;
 }

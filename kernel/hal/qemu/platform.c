@@ -43,3 +43,31 @@ void hal_led_off(void) {
 void hal_led_toggle(void) {
     // No LED on QEMU virt
 }
+
+// CPU Info
+const char *hal_get_cpu_name(void) {
+    return "Cortex-A72";
+}
+
+uint32_t hal_get_cpu_freq_mhz(void) {
+    return 1500;  // QEMU virt default
+}
+
+int hal_get_cpu_cores(void) {
+    return 1;  // Single core in QEMU by default
+}
+
+// USB Device List - QEMU uses virtio, no USB
+int hal_usb_get_device_count(void) {
+    return 0;
+}
+
+int hal_usb_get_device_info(int idx, uint16_t *vid, uint16_t *pid,
+                            char *name, int name_len) {
+    (void)idx;
+    (void)vid;
+    (void)pid;
+    (void)name;
+    (void)name_len;
+    return -1;
+}

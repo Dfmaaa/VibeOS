@@ -91,4 +91,8 @@ void context_switch(cpu_context_t *old_ctx, cpu_context_t *new_ctx);
 // Returns 1 if slot is active, 0 if free
 int process_get_info(int index, char *name, int name_size, int *state);
 
+// Kill a process by PID
+// Returns 0 on success, -1 if not found or cannot kill
+int process_kill(int pid);
+
 #endif

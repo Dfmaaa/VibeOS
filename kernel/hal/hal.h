@@ -109,4 +109,20 @@ void hal_led_on(void);
 void hal_led_off(void);
 void hal_led_toggle(void);
 
+/*
+ * CPU Info
+ * Platform-specific CPU information
+ */
+const char *hal_get_cpu_name(void);     // e.g., "Cortex-A72"
+uint32_t hal_get_cpu_freq_mhz(void);    // e.g., 1500 for 1.5GHz
+int hal_get_cpu_cores(void);            // e.g., 4
+
+/*
+ * USB Device Info
+ * List of enumerated USB devices (Pi only, QEMU returns 0)
+ */
+int hal_usb_get_device_count(void);
+int hal_usb_get_device_info(int idx, uint16_t *vid, uint16_t *pid,
+                            char *name, int name_len);
+
 #endif // HAL_H

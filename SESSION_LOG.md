@@ -1220,3 +1220,42 @@ Session 44: USB Keyboard Working on Real Pi Hardware!
   - `kernel/hal/pizero2w/emmc.c` - Multi-block commands, High Speed mode
   - `kernel/fat32.c` - FAT sector cache with LRU eviction
 - **Result:** File operations dramatically faster on real Pi hardware
+
+  ### Session 46
+  - **MASSIVE COREUTILS EXPANSION - 27 new commands!**
+  - **File Operations (11):**
+    - `cp` - copy files/directories with `-r` recursive support
+    - `mv` - move/rename (uses rename for same-dir, copy+delete for cross-dir)
+    - `head` / `tail` - first/last N lines (`-n` flag)
+    - `wc` - word/line/char count (`-lwc` flags)
+    - `grep` - simple substring search (`-i` case insensitive, `-n` line numbers, `-v` invert)
+    - `find` - find files by name pattern (`-name`, `-type f|d`)
+    - `stat` - file size and type
+    - `du` - disk usage with `-h` human-readable, `-s` summary
+    - `df` - filesystem free space
+    - `hexdump` - hex dump with `-C` canonical format
+  - **System Info (7):**
+    - `ps` - process list showing PID, state, name
+    - `kill` - terminate process by PID (real implementation!)
+    - `free` - memory usage (`-h`, `-m`, `-k` flags)
+    - `uname` - system info (`-a`, `-s`, `-n`, `-r`, `-m`)
+    - `hostname` - print hostname
+    - `lscpu` - CPU info (model, frequency, cores, RAM)
+    - `lsusb` - USB device list (Pi shows real devices, QEMU shows none)
+  - **Misc (9):**
+    - `sleep` - sleep N seconds
+    - `seq` - print number sequences
+    - `which` - find command in /bin
+    - `whoami` - print current user ("user")
+    - `yes` - repeat string forever
+    - `clear` - clear screen
+    - `basename` / `dirname` - path manipulation
+  - **Kernel changes for kill/lscpu/lsusb:**
+    - Added `process_kill(int pid)` to kernel/process.c
+    - Added HAL functions: `hal_get_cpu_name()`, `hal_get_cpu_freq_mhz()`, `hal_get_cpu_cores()`
+    - Added HAL functions: `hal_usb_get_device_count()`, `hal_usb_get_device_info()`
+    - QEMU: returns Cortex-A72 @ 1500MHz, 1 core, no USB devices
+    - Pi: returns Cortex-A53 @ 1000MHz, 4 cores, real USB device list
+  - **Files created:** 27 new files in user/bin/
+  - **Files modified:** Makefile, kernel/process.c, kernel/process.h, kernel/kapi.c, kernel/kapi.h, user/lib/vibe.h, kernel/hal/hal.h, kernel/hal/qemu/platform.c, kernel/hal/pizero2w/platform.c
+  - **Achievement**: VibeOS now has a proper Unix-like coreutils suite!
