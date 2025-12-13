@@ -1342,3 +1342,39 @@ Session 44: USB Keyboard Working on Real Pi Hardware!
   - Console scroll: memmove every line → GPU offset update (37x fewer copies)
   - Vim clear: ~100 putc per line → 1 fb_fill_rect call
   - Overall: text apps significantly faster on Pi
+
+### Session 49
+- **Kernel Ring Buffer and dmesg**
+- **Goal:** Add a kernel logging system like Linux dmesg
+- **Implementation:**
+  1. **Kernel ring buffer** (`kernel/klog.c`, `kernel/klog.h`)
+     - 64KB static circular buffer
+     - `klog_putc()` writes one char, wraps around when full
+     - `klog_read()` reads from any offset, handles wrap-around
+     - `klog_size()` returns current log size
+  2. **Printf integration** (`kernel/printf.c`)
+     - Added `klog_putc(c)` to `printf_putchar()` - always logs
+     - Happens in addition to UART/screen output, not instead of
+     - No compile flags needed, fully automatic
+  3. **Early initialization** (`kernel/kernel.c`)
+     - `klog_init()` called before `memory_init()`
+     - Uses static buffer, no malloc needed
+     - Captures all boot messages from first printf onward
+  4. **kapi exposure** (`kernel/kapi.c`, `kernel/kapi.h`, `user/lib/vibe.h`)
+     - `klog_read(buf, offset, size)` - read log data
+     - `klog_size()` - get total logged bytes
+  5. **dmesg program** (`user/bin/dmesg.c`)
+     - Interactive scrollable viewer (default)
+     - `-n` flag for non-interactive dump
+     - Controls: j/k arrows scroll, g/G start/end, u/d page, q quit
+     - Status bar shows position (e.g., "45-68/120")
+- **Files created:**
+  - `kernel/klog.h` - ring buffer header
+  - `kernel/klog.c` - ring buffer implementation
+  - `user/bin/dmesg.c` - log viewer program
+- **Files modified:**
+  - `kernel/printf.c` - added klog_putc() call
+  - `kernel/kernel.c` - klog_init() early in boot
+  - `kernel/kapi.c/h` - exposed klog functions
+  - `user/lib/vibe.h` - kapi struct updated
+  - `Makefile` - added dmesg to USER_PROGS
