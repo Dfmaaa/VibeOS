@@ -3,8 +3,10 @@
  *
  * A windowed terminal that runs vibesh inside a desktop window.
  * Features:
- *   - Scrollback buffer (configurable lines)
- *   - Mouse wheel scrolling
+ *   - 500-line scrollback buffer
+ *   - Draggable scrollbar (click and drag the thumb)
+ *   - Mouse drag scrolling (click and drag text area to scroll)
+ *   - Page Up/Page Down keyboard scrolling
  *   - Ctrl+C handling
  *   - Form feed (\f) for clear screen
  */
@@ -22,8 +24,12 @@
 #define CHAR_WIDTH 8
 #define CHAR_HEIGHT 16
 
+// Scrollbar dimensions
+#define SCROLLBAR_WIDTH 16
+#define SCROLLBAR_MIN_THUMB 20  // Minimum thumb height in pixels
+
 // Window dimensions
-#define WIN_WIDTH  (TERM_COLS * CHAR_WIDTH)
+#define WIN_WIDTH  (TERM_COLS * CHAR_WIDTH + SCROLLBAR_WIDTH)
 #define WIN_HEIGHT (TERM_ROWS * CHAR_HEIGHT)
 
 // Colors (1-bit style)
@@ -58,6 +64,11 @@ static int input_tail = 0;
 
 // Flag to track if shell is still running
 static int shell_running = 1;
+
+// Scrollbar state
+static int scrollbar_dragging = 0;
+static int scrollbar_drag_start_y = 0;
+static int scrollbar_drag_start_offset = 0;
 
 // Forward declarations
 static void redraw_screen(void);
@@ -113,12 +124,18 @@ static void new_line(void) {
         scroll_count++;
     }
 
-    // If we were scrolled back, stay at the same view position
-    // (effectively scroll_offset increases by 1)
-    // But if scroll_offset is 0, we stay at bottom
-    if (scroll_offset > 0 && scroll_offset < scroll_count - TERM_ROWS) {
+    // If we're NOT scrolled back (scroll_offset == 0), stay at bottom
+    // If we ARE scrolled back, keep viewing the same content (offset increases by 1)
+    if (scroll_offset > 0) {
         scroll_offset++;
+        // Don't let offset exceed the max (can't scroll past the top of buffer)
+        int max_offset = scroll_count - TERM_ROWS;
+        if (max_offset < 0) max_offset = 0;
+        if (scroll_offset > max_offset) {
+            scroll_offset = max_offset;
+        }
     }
+    // else scroll_offset stays 0, we stay at bottom showing newest content
 }
 
 // Clear the entire scrollback and screen
@@ -186,6 +203,63 @@ static void update_cursor_blink(void) {
     }
 }
 
+static void draw_scrollbar(void) {
+    // Calculate scrollbar geometry
+    int sb_x = TERM_COLS * CHAR_WIDTH;
+    int sb_y = 0;
+    int sb_h = WIN_HEIGHT;
+
+    // Draw scrollbar background (light gray)
+    uint32_t track_color = 0x00CCCCCC;
+    for (int y = sb_y; y < sb_y + sb_h; y++) {
+        for (int x = sb_x; x < sb_x + SCROLLBAR_WIDTH; x++) {
+            int idx = y * win_w + x;
+            if (idx >= 0 && idx < win_w * win_h) {
+                win_buffer[idx] = track_color;
+            }
+        }
+    }
+
+    // Calculate thumb position and size
+    int max_offset = scroll_count - TERM_ROWS;
+    if (max_offset < 0) max_offset = 0;
+
+    // If there's no scrollable content, fill the whole track
+    if (max_offset == 0) {
+        // Draw full-height thumb (disabled state)
+        uint32_t thumb_color = 0x00999999;
+        for (int y = sb_y + 2; y < sb_y + sb_h - 2; y++) {
+            for (int x = sb_x + 2; x < sb_x + SCROLLBAR_WIDTH - 2; x++) {
+                int idx = y * win_w + x;
+                if (idx >= 0 && idx < win_w * win_h) {
+                    win_buffer[idx] = thumb_color;
+                }
+            }
+        }
+        return;
+    }
+
+    // Calculate thumb size proportional to visible content
+    int thumb_h = (sb_h * TERM_ROWS) / scroll_count;
+    if (thumb_h < SCROLLBAR_MIN_THUMB) thumb_h = SCROLLBAR_MIN_THUMB;
+    if (thumb_h > sb_h - 4) thumb_h = sb_h - 4;
+
+    // Calculate thumb position (inverted because higher offset = scrolled up)
+    int track_range = sb_h - thumb_h - 4;
+    int thumb_y = sb_y + 2 + ((max_offset - scroll_offset) * track_range) / max_offset;
+
+    // Draw thumb (dark gray)
+    uint32_t thumb_color = 0x00666666;
+    for (int y = thumb_y; y < thumb_y + thumb_h; y++) {
+        for (int x = sb_x + 2; x < sb_x + SCROLLBAR_WIDTH - 2; x++) {
+            int idx = y * win_w + x;
+            if (idx >= 0 && idx < win_w * win_h) {
+                win_buffer[idx] = thumb_color;
+            }
+        }
+    }
+}
+
 static void redraw_screen(void) {
     // Clear buffer
     for (int i = 0; i < win_w * win_h; i++) {
@@ -205,7 +279,7 @@ static void redraw_screen(void) {
 
     // Draw scrollback indicator if scrolled back
     if (scroll_offset > 0) {
-        // Draw a small indicator in top-right
+        // Draw a small indicator in top-right of text area
         char indicator[16];
         int lines_back = scroll_offset;
         // Simple integer to string
@@ -217,7 +291,7 @@ static void redraw_screen(void) {
         indicator[i++] = ']';
         indicator[i] = '\0';
 
-        // Draw at top right, inverted
+        // Draw at top right of text area, inverted
         int start_col = TERM_COLS - i;
         for (int j = 0; j < i && indicator[j]; j++) {
             // Draw inverted
@@ -238,6 +312,9 @@ static void redraw_screen(void) {
 
     // Draw cursor
     draw_cursor();
+
+    // Draw scrollbar
+    draw_scrollbar();
 
     // Tell desktop to redraw
     api->window_invalidate(window_id);
@@ -445,8 +522,20 @@ int main(kapi_t *kapi, int argc, char **argv) {
             }
 
             if (event_type == WIN_EVENT_KEY) {
+                int key = data1;
+
+                // Check for scroll keys (Page Up/Page Down)
+                if (key == KEY_PGUP) {  // Page Up
+                    scroll_up(TERM_ROWS / 2);  // Scroll up half a screen
+                    continue;  // Don't pass to shell
+                }
+                if (key == KEY_PGDN) {  // Page Down
+                    scroll_down(TERM_ROWS / 2);  // Scroll down half a screen
+                    continue;  // Don't pass to shell
+                }
+
                 // Key pressed - add to input buffer (data1 is int, preserves special keys)
-                input_push(data1);
+                input_push(key);
 
                 // Reset cursor blink to visible on keypress
                 cursor_visible = 1;
@@ -459,28 +548,72 @@ int main(kapi_t *kapi, int argc, char **argv) {
             }
 
             if (event_type == WIN_EVENT_MOUSE_DOWN) {
-                // Start tracking for scroll
-                last_mouse_y = data2;  // data2 is y position
-                mouse_scrolling = 1;
+                int mouse_x = data1;
+                int mouse_y = data2;
+
+                // Check if click is in scrollbar area
+                int sb_x = TERM_COLS * CHAR_WIDTH;
+                if (mouse_x >= sb_x && mouse_x < sb_x + SCROLLBAR_WIDTH) {
+                    // Click in scrollbar
+                    scrollbar_dragging = 1;
+                    scrollbar_drag_start_y = mouse_y;
+                    scrollbar_drag_start_offset = scroll_offset;
+                } else {
+                    // Click in text area - start content drag scrolling
+                    last_mouse_y = mouse_y;
+                    mouse_scrolling = 1;
+                }
             }
 
             if (event_type == WIN_EVENT_MOUSE_UP) {
                 mouse_scrolling = 0;
+                scrollbar_dragging = 0;
             }
 
             if (event_type == WIN_EVENT_MOUSE_MOVE) {
-                // Check for scroll gesture (drag with button held)
-                // data3 contains button state
-                if (mouse_scrolling && (data3 & MOUSE_BTN_LEFT)) {
-                    int dy = data2 - last_mouse_y;
+                int mouse_y = data2;
+
+                // Handle scrollbar dragging
+                if (scrollbar_dragging && (data3 & MOUSE_BTN_LEFT)) {
+                    int dy = mouse_y - scrollbar_drag_start_y;
+
+                    // Calculate how much to scroll based on drag distance
+                    int max_offset = scroll_count - TERM_ROWS;
+                    if (max_offset < 0) max_offset = 0;
+
+                    if (max_offset > 0) {
+                        // Calculate thumb size and track range
+                        int sb_h = WIN_HEIGHT;
+                        int thumb_h = (sb_h * TERM_ROWS) / scroll_count;
+                        if (thumb_h < SCROLLBAR_MIN_THUMB) thumb_h = SCROLLBAR_MIN_THUMB;
+                        if (thumb_h > sb_h - 4) thumb_h = sb_h - 4;
+                        int track_range = sb_h - thumb_h - 4;
+
+                        // Convert pixel movement to scroll offset (inverted)
+                        int offset_delta = -(dy * max_offset) / track_range;
+                        int new_offset = scrollbar_drag_start_offset + offset_delta;
+
+                        // Clamp
+                        if (new_offset < 0) new_offset = 0;
+                        if (new_offset > max_offset) new_offset = max_offset;
+
+                        if (new_offset != scroll_offset) {
+                            scroll_offset = new_offset;
+                            redraw_screen();
+                        }
+                    }
+                }
+                // Handle content drag scrolling
+                else if (mouse_scrolling && (data3 & MOUSE_BTN_LEFT)) {
+                    int dy = mouse_y - last_mouse_y;
                     if (dy < -CHAR_HEIGHT) {
-                        // Dragged down = scroll up (show older)
-                        scroll_up(1);
-                        last_mouse_y = data2;
-                    } else if (dy > CHAR_HEIGHT) {
-                        // Dragged up = scroll down (show newer)
+                        // Dragged up (mouse Y decreased) = scroll down (show newer)
                         scroll_down(1);
-                        last_mouse_y = data2;
+                        last_mouse_y = mouse_y;
+                    } else if (dy > CHAR_HEIGHT) {
+                        // Dragged down (mouse Y increased) = scroll up (show older)
+                        scroll_up(1);
+                        last_mouse_y = mouse_y;
                     }
                 }
             }

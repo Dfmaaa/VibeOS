@@ -20,8 +20,9 @@ static uint32_t fb_buffer_height = 0;  // Actual buffer height (may be > fb_heig
 int fb_init(void) {
     // Note: Don't use printf here - console isn't initialized yet!
 
-    // Call platform-specific init with 1080p resolution
-    if (hal_fb_init(1920, 1080) < 0) {
+    // Call platform-specific init with 800x600 resolution (matches Pi)
+    // Pi overrides to 800x600 anyway for performance
+    if (hal_fb_init(800, 600) < 0) {
         return -1;
     }
 

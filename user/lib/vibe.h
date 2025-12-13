@@ -238,6 +238,8 @@ typedef struct {
 #define KEY_HOME   0x104
 #define KEY_END    0x105
 #define KEY_DELETE 0x106
+#define KEY_PGUP   0x107
+#define KEY_PGDN   0x108
 
 // Colors (must match kernel fb.h - these are RGB values)
 #define COLOR_BLACK   0x00000000

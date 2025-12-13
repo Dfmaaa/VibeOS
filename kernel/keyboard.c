@@ -159,6 +159,8 @@ static const char scancode_to_ascii_shift[128] = {
 #define KEY_HOME        102
 #define KEY_END         107
 #define KEY_DELETE      111
+#define KEY_PAGE_UP     104
+#define KEY_PAGE_DOWN   109
 
 // Special key codes returned by keyboard_getc() (values >= 128)
 #define SPECIAL_KEY_UP     0x100
@@ -168,6 +170,8 @@ static const char scancode_to_ascii_shift[128] = {
 #define SPECIAL_KEY_HOME   0x104
 #define SPECIAL_KEY_END    0x105
 #define SPECIAL_KEY_DELETE 0x106
+#define SPECIAL_KEY_PGUP   0x107
+#define SPECIAL_KEY_PGDN   0x108
 
 // Modifier state
 static int shift_held = 0;
@@ -465,6 +469,8 @@ static void process_events(void) {
                     case KEY_HOME:        key = SPECIAL_KEY_HOME; break;
                     case KEY_END:         key = SPECIAL_KEY_END; break;
                     case KEY_DELETE:      key = SPECIAL_KEY_DELETE; break;
+                    case KEY_PAGE_UP:     key = SPECIAL_KEY_PGUP; break;
+                    case KEY_PAGE_DOWN:   key = SPECIAL_KEY_PGDN; break;
                     default:
                         // Regular key
                         if (code < 128) {

@@ -1155,6 +1155,7 @@ static void handle_mouse_move(int x, int y) {
         if (w->x + w->w > SCREEN_WIDTH) w->x = SCREEN_WIDTH - w->w;
         if (w->y + w->h > SCREEN_HEIGHT - DOCK_HEIGHT)
             w->y = SCREEN_HEIGHT - DOCK_HEIGHT - w->h;
+        return;  // Don't send move events while dragging
     }
 
     if (resizing_window >= 0) {
@@ -1175,6 +1176,20 @@ static void handle_mouse_move(int x, int y) {
 
         w->w = new_w;
         w->h = new_h;
+        return;  // Don't send move events while resizing
+    }
+
+    // Send mouse move event to window under cursor (if in content area)
+    int wid = window_at_point(x, y);
+    if (wid >= 0) {
+        window_t *w = &windows[wid];
+        // Only send if in content area (below title bar)
+        if (y >= w->y + TITLE_BAR_HEIGHT) {
+            int local_x = x - w->x - 1;
+            int local_y = y - w->y - TITLE_BAR_HEIGHT - 1;
+            uint8_t buttons = api->mouse_get_buttons();
+            push_event(wid, WIN_EVENT_MOUSE_MOVE, local_x, local_y, buttons);
+        }
     }
 }
 
