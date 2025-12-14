@@ -145,6 +145,18 @@
 #define HCCHAR_CHDIS            (1 << 30)   // Channel disable
 #define HCCHAR_CHENA            (1 << 31)   // Channel enable
 
+// HCSPLT bits (split transaction support for FS/LS devices behind HS hubs)
+#define HCSPLT_PRTADDR_MASK     0x7F        // bits [6:0] - hub port address
+#define HCSPLT_HUBADDR_SHIFT    7           // bits [13:7] - hub device address
+#define HCSPLT_HUBADDR_MASK     (0x7F << 7)
+#define HCSPLT_XACTPOS_SHIFT    14          // bits [15:14] - transaction position
+#define HCSPLT_XACTPOS_ALL      0           // All of payload (< max packet)
+#define HCSPLT_XACTPOS_BEGIN    1           // Beginning of payload
+#define HCSPLT_XACTPOS_MID      2           // Middle of payload
+#define HCSPLT_XACTPOS_END      3           // End of payload
+#define HCSPLT_COMPSPLT         (1U << 16)  // Complete split (0=start, 1=complete)
+#define HCSPLT_SPLITENA         0x80000000U // Split enable (bit 31)
+
 // HCINT bits (channel interrupts)
 #define HCINT_XFERCOMPL         (1 << 0)    // Transfer complete
 #define HCINT_CHHLTD            (1 << 1)    // Channel halted
@@ -152,6 +164,7 @@
 #define HCINT_STALL             (1 << 3)    // STALL response
 #define HCINT_NAK               (1 << 4)    // NAK response
 #define HCINT_ACK               (1 << 5)    // ACK response
+#define HCINT_NYET              (1 << 6)    // NYET response (split transactions)
 #define HCINT_XACTERR           (1 << 7)    // Transaction error
 #define HCINT_BBLERR            (1 << 8)    // Babble error
 #define HCINT_FRMOVRUN          (1 << 9)    // Frame overrun

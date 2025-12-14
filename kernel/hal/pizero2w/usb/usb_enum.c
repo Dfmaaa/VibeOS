@@ -118,14 +118,24 @@ int usb_clear_port_feature(int hub_addr, int port, int feature) {
 // ============================================================================
 
 int usb_enumerate_hub(int hub_addr, int num_ports) {
-    usb_info("[USB] Enumerating hub at addr %d with %d ports\n", hub_addr, num_ports);
+    // Find hub device to get its speed
+    const char *speed_names[] = {"High", "Full", "Low"};
+    int hub_speed = 1;  // Default FS
+    for (int i = 0; i < usb_state.num_devices; i++) {
+        if (usb_state.devices[i].address == hub_addr) {
+            hub_speed = usb_state.devices[i].speed;
+            break;
+        }
+    }
+    usb_info("[USB] Enumerating %s-speed hub at addr %d with %d ports\n",
+             speed_names[hub_speed], hub_addr, num_ports);
 
     for (int port = 1; port <= num_ports; port++) {
-        usb_debug("[USB] Hub port %d: powering on...\n", port);
+        usb_info("[USB] Hub port %d: powering on...\n", port);
 
         // Power on port
         if (usb_set_port_feature(hub_addr, port, USB_PORT_FEAT_POWER) < 0) {
-            usb_debug("[USB] Failed to power on port %d\n", port);
+            usb_info("[USB] Failed to power on port %d\n", port);
             continue;
         }
 
@@ -135,15 +145,16 @@ int usb_enumerate_hub(int hub_addr, int num_ports) {
         // Get port status
         uint32_t status = 0;
         if (usb_get_port_status(hub_addr, port, &status) < 0) {
-            usb_debug("[USB] Failed to get port %d status\n", port);
+            usb_info("[USB] Failed to get port %d status\n", port);
             continue;
         }
 
-        usb_debug("[USB] Port %d status: %08x\n", port, status);
+        usb_info("[USB] Port %d status: %08x (pwr=%d conn=%d ena=%d)\n", port, status,
+                 (status >> 8) & 1, status & 1, (status >> 1) & 1);
 
         // Check if device connected
         if (!(status & USB_PORT_STAT_CONNECTION)) {
-            usb_debug("[USB] Port %d: no device\n", port);
+            usb_info("[USB] Port %d: no device\n", port);
             continue;
         }
 
@@ -151,27 +162,40 @@ int usb_enumerate_hub(int hub_addr, int num_ports) {
 
         // Reset port
         if (usb_set_port_feature(hub_addr, port, USB_PORT_FEAT_RESET) < 0) {
-            usb_debug("[USB] Failed to reset port %d\n", port);
+            usb_info("[USB] Failed to reset port %d\n", port);
             continue;
         }
 
-        // Wait for reset to complete
-        msleep(50);
+        // Poll for reset complete (more robust than fixed delay)
+        int reset_timeout = 20;  // 200ms max
+        while (reset_timeout--) {
+            msleep(10);
+            if (usb_get_port_status(hub_addr, port, &status) < 0) {
+                break;
+            }
+            // Reset done when RESET bit clears
+            if (!(status & USB_PORT_STAT_RESET)) {
+                break;
+            }
+        }
 
-        // Get port status again
+        // Get final port status
         if (usb_get_port_status(hub_addr, port, &status) < 0) {
-            usb_debug("[USB] Failed to get port %d status after reset\n", port);
+            usb_info("[USB] Failed to get port %d status after reset\n", port);
             continue;
         }
 
-        usb_debug("[USB] Port %d after reset: %08x\n", port, status);
+        usb_info("[USB] Port %d after reset: %08x (ena=%d LS=%d HS=%d)\n", port, status,
+                 (status >> 1) & 1, (status >> 9) & 1, (status >> 10) & 1);
 
-        // Clear reset change
+        // Clear reset change and other change bits
         usb_clear_port_feature(hub_addr, port, USB_PORT_FEAT_C_RESET);
+        usb_clear_port_feature(hub_addr, port, USB_PORT_FEAT_C_CONNECTION);
+        usb_clear_port_feature(hub_addr, port, USB_PORT_FEAT_C_ENABLE);
 
         // Check if port is enabled
         if (!(status & USB_PORT_STAT_ENABLE)) {
-            usb_debug("[USB] Port %d: not enabled after reset\n", port);
+            usb_info("[USB] Port %d: not enabled after reset\n", port);
             continue;
         }
 
@@ -183,8 +207,13 @@ int usb_enumerate_hub(int hub_addr, int num_ports) {
             speed = 0;  // High Speed
         }
 
-        const char *speed_names[] = {"High", "Full", "Low"};
-        usb_debug("[USB] Port %d: %s speed device\n", port, speed_names[speed]);
+        usb_info("[USB] Port %d: %s speed device detected\n", port, speed_names[speed]);
+
+        // Check if splits will be needed
+        if (hub_speed == 0 && speed != 0) {
+            usb_info("[USB] NOTE: Device is %s behind HS hub - split transactions required\n",
+                     speed_names[speed]);
+        }
 
         // Enumerate the device on this port
         msleep(10);  // Recovery time
@@ -215,10 +244,18 @@ int usb_enumerate_device_at(int parent_addr, int port, int speed) {
     int old_speed = usb_state.device_speed;
     usb_state.device_speed = speed;
 
+    // Set enumeration context for address 0 split routing
+    // (needed when enumerating FS/LS devices behind HS hubs)
+    usb_state.enum_parent_hub = parent_addr;
+    usb_state.enum_parent_port = port;
+    usb_state.enum_speed = speed;
+
     int ret = usb_get_device_descriptor(0, &desc);
     if (ret < 8) {
-        usb_debug("[USB] Failed to get device descriptor (got %d bytes)\n", ret);
+        usb_info("[USB] Failed to get device descriptor (got %d bytes)\n", ret);
         usb_state.device_speed = old_speed;
+        usb_state.enum_parent_hub = 0;
+        usb_state.enum_parent_port = 0;
         return -1;
     }
 
@@ -233,6 +270,8 @@ int usb_enumerate_device_at(int parent_addr, int port, int speed) {
     if (ret < 0) {
         usb_debug("[USB] Failed to set address %d\n", new_addr);
         usb_state.device_speed = old_speed;
+        usb_state.enum_parent_hub = 0;
+        usb_state.enum_parent_port = 0;
         return -1;
     }
     msleep(10);
@@ -246,6 +285,11 @@ int usb_enumerate_device_at(int parent_addr, int port, int speed) {
     dev->parent_port = port;
     dev->is_hub = 0;
     dev->hub_ports = 0;
+
+    // Clear enumeration context (device now has an address in device list)
+    usb_state.enum_parent_hub = 0;
+    usb_state.enum_parent_port = 0;
+    usb_state.enum_speed = usb_state.device_speed;
 
     // Get full device descriptor at new address
     ret = usb_get_device_descriptor(new_addr, &desc);

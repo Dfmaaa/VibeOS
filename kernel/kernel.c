@@ -140,6 +140,10 @@ void kernel_main(void) {
 
     // Initialize GPIO LED
     hal_led_init();
+
+    // Enable interrupts early so USB can use timer-based delays
+    printf("[KERNEL] Enabling interrupts for USB init...\n");
+    hal_irq_enable();
 #endif
 
 #ifdef TARGET_QEMU
@@ -180,11 +184,7 @@ void kernel_main(void) {
     printf("[DEBUG] ==========================================\n");
     printf("\n");
 
-    // Enable interrupts so USB IRQ-driven keyboard works
-    printf("[DEBUG] Enabling interrupts for USB...\n");
-    hal_irq_enable();
-    printf("[DEBUG] Interrupts enabled!\n");
-
+    // Interrupts already enabled before USB init
     usb_keyboard_debug_loop();  // Never returns
 #endif
 
@@ -240,12 +240,8 @@ void kernel_main(void) {
     printf("[KERNEL] Enabling interrupts...\n");
     irq_enable();
     printf("[KERNEL] Interrupts enabled!\n");
-#else
-    // Pi: Enable interrupts
-    printf("[KERNEL] Enabling interrupts...\n");
-    hal_irq_enable();
-    printf("[KERNEL] Interrupts enabled!\n");
 #endif
+    // Pi: interrupts already enabled before USB init
 
     printf("\n");
     printf("[KERNEL] Starting shell...\n");

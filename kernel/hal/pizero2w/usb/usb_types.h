@@ -211,6 +211,12 @@ typedef struct {
     int keyboard_ep;            // Interrupt endpoint
     int keyboard_mps;           // Max packet size for interrupt EP
     int keyboard_interval;      // Polling interval
+
+    // Address-0 routing during enumeration behind a hub
+    // (needed for split transactions when enumerating FS/LS devices behind HS hubs)
+    int enum_parent_hub;        // Hub address (0 = root port)
+    int enum_parent_port;       // Port on hub (0 = root)
+    int enum_speed;             // Speed of device being enumerated (0=HS, 1=FS, 2=LS)
 } usb_state_t;
 
 // Global USB state (defined in dwc2_core.c)

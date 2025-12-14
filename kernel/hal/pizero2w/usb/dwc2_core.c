@@ -33,28 +33,21 @@ inline void dsb(void) {
 // Timing Functions
 // ============================================================================
 
+// Use kernel's timer-based sleep (interrupts must be enabled first!)
+extern void sleep_ms(uint32_t ms);
+
 void usleep(uint32_t us) {
-    // Use ARM generic timer for accurate delays
-    uint64_t freq, start, target;
-    asm volatile("mrs %0, cntfrq_el0" : "=r"(freq));
-    asm volatile("mrs %0, cntpct_el0" : "=r"(start));
-    target = start + (freq * us / 1000000);
-    uint64_t now;
-    do {
-        asm volatile("mrs %0, cntpct_el0" : "=r"(now));
-    } while (now < target);
+    // For microsecond delays, use Pi system timer (1MHz free-running counter)
+    volatile uint32_t *systimer = (volatile uint32_t *)0x3F003004;
+    uint32_t start = *systimer;
+    while ((*systimer - start) < us) {
+        asm volatile("nop");
+    }
 }
 
 void msleep(uint32_t ms) {
-    // Use ARM generic timer for accurate delays
-    uint64_t freq, start, target;
-    asm volatile("mrs %0, cntfrq_el0" : "=r"(freq));
-    asm volatile("mrs %0, cntpct_el0" : "=r"(start));
-    target = start + (freq * ms / 1000);
-    uint64_t now;
-    do {
-        asm volatile("mrs %0, cntpct_el0" : "=r"(now));
-    } while (now < target);
+    // Use kernel's sleep_ms which uses timer ticks (works now that IRQs are enabled)
+    sleep_ms(ms);
 }
 
 // ============================================================================
@@ -334,7 +327,8 @@ int usb_init_host(void) {
 
     // Host configuration
     // Pi uses UTMI+ PHY at 60MHz - use FSLSPCLKSEL=0 (30/60 MHz mode)
-    HCFG = HCFG_FSLSPCLKSEL_30_60;
+    // Force FS/LS only mode to avoid split transaction issues with HS hubs
+    HCFG = HCFG_FSLSPCLKSEL_30_60 | HCFG_FSLSUPP;
     dsb();
 
     // Frame interval for 60MHz PHY
@@ -430,7 +424,8 @@ int usb_port_reset(void) {
     // Pi uses UTMI+ PHY which runs at 60MHz, even for FS/LS devices
     // FSLSPCLKSEL = 0 means 30/60 MHz (for UTMI+ HS PHY)
     // FSLSPCLKSEL = 1 means 48 MHz (for dedicated FS PHY - NOT on Pi)
-    HCFG = HCFG_FSLSPCLKSEL_30_60;  // Must be 0 for Pi's UTMI+ PHY
+    // Force FS/LS only mode to avoid split transaction issues with HS hubs
+    HCFG = HCFG_FSLSPCLKSEL_30_60 | HCFG_FSLSUPP;
     HFIR = 60000;  // 60MHz * 1ms = 60000 clocks per frame
     dsb();
     usb_debug("[USB] HCFG=%08x HFIR=%08x\n", HCFG, HFIR);

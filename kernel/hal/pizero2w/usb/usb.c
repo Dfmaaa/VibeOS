@@ -16,6 +16,7 @@
 #include "usb_hid.h"
 #include "../../hal.h"
 #include "../../../printf.h"
+#include "../../../string.h"
 
 // IRQ number for USB on Pi
 #define IRQ_VC_USB  17  // VideoCore bank1 IRQ 9

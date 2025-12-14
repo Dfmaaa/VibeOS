@@ -66,7 +66,7 @@ VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targe
 - [x] HTTPS client - `/bin/fetch` can make HTTPS requests to google.com, etc!
 - [x] Raspberry Pi Zero 2W support - boots on real hardware!
 - [x] Pi SD card (EMMC) driver - FAT32 filesystem works, userspace runs!
-- [x] Pi USB host (DWC2) - Device enumeration working, HID keyboard detected!
+- [x] Pi USB host (DWC2) - Device enumeration working, HID keyboard via hub works!
 
 ## Architecture Decisions Made
 1. **Target**: QEMU virt machine, aarch64, Cortex-A72
@@ -257,6 +257,8 @@ hdiutil detach /Volumes/VIBEOS # Unmount before running QEMU
 - **DWC2 USB PHY clock on Pi**: Pi uses UTMI+ PHY at 60MHz. Set HCFG.FSLSPCLKSEL=0 (30/60MHz mode), NOT 1 (48MHz). Wrong setting causes premature frame end and babble errors.
 - **DWC2 USB multi-packet IN transfers**: In slave mode, must re-enable channel after each packet received. Controller doesn't automatically continue. Re-enable on ACK and IN_COMPLETE events.
 - **DWC2 USB GRXSTSP parsing**: Only read FIFO data when pktsts=2 (IN data) and bcnt>0. Other status values (3=complete, 7=halted) don't have data to read.
+- **DWC2 USB split transactions broken**: FS devices behind HS hubs require split transactions. The DWC2 split transaction state machine (start-split → complete-split) had issues causing infinite NYET loops. Workaround: Set `HCFG_FSLSUPP` to force Full-Speed only mode. Hub connects at FS, no splits needed. 12 Mbps is plenty for keyboard/mouse.
+- **USB msleep must use kernel timer**: The USB driver's msleep() using ARM generic timer (`cntfrq_el0`) didn't work on Pi. Use kernel's `sleep_ms()` which uses timer tick interrupts. Interrupts must be enabled before USB init.
 
 ## Session Log
 For detailed session-by-session development history, see [session_log.md](session_log.md).

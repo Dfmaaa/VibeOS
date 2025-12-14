@@ -9,6 +9,7 @@
  */
 
 #include "usb_hid.h"
+#include "usb_transfer.h"
 #include "dwc2_core.h"
 #include "dwc2_regs.h"
 #include "../../../printf.h"
@@ -25,11 +26,12 @@ const usb_debug_stats_t* usb_hid_get_stats(void) {
 }
 
 void usb_hid_print_stats(void) {
-    printf("[USB-STATS] IRQ=%u KBD=%u data=%u NAK=%u err=%u restart=%u port=%u watchdog=%u\n",
+    printf("[USB-STATS] IRQ=%u KBD=%u data=%u NAK=%u NYET=%u err=%u restart=%u port=%u watchdog=%u\n",
            debug_stats.irq_count,
            debug_stats.kbd_irq_count,
            debug_stats.kbd_data_count,
            debug_stats.kbd_nak_count,
+           debug_stats.kbd_nyet_count,
            debug_stats.kbd_error_count,
            debug_stats.kbd_restart_count,
            debug_stats.port_irq_count,
@@ -78,9 +80,27 @@ static uint8_t __attribute__((aligned(64))) intr_dma_buffer[64];
 // Data toggle for interrupt endpoint
 static int keyboard_data_toggle = 0;
 
+// Helper to re-enable channel with updated ODDFRM (critical for split transactions)
+static inline void kbd_reenable_channel(int ch) {
+    uint32_t hcchar = HCCHAR(ch);
+    // Update odd/even frame bit for proper scheduling
+    hcchar &= ~HCCHAR_ODDFRM;
+    if (HFNUM & 1) hcchar |= HCCHAR_ODDFRM;
+    hcchar |= HCCHAR_CHENA;
+    hcchar &= ~HCCHAR_CHDIS;
+    HCCHAR(ch) = hcchar;
+    dsb();
+}
+
 // Transfer state
 static volatile int kbd_transfer_pending = 0;
 static volatile uint32_t kbd_last_transfer_tick = 0;  // For watchdog
+
+// Split transaction state for ISR
+static volatile uint16_t split_start_frame = 0;   // Frame when start-split completed
+static volatile int split_nyet_count = 0;         // NYET retries in complete-split
+#define MAX_SPLIT_NYET_RETRIES 50                 // Max NYETs before restart
+#define SPLIT_FRAME_WAIT 8                        // Wait ~1ms (8 microframes) for FS transaction
 
 // Port recovery state (set by IRQ, handled by timer)
 static volatile int port_reset_pending = 0;
@@ -111,6 +131,13 @@ static void usb_do_keyboard_transfer(void) {
     kbd_transfer_pending = 1;
     kbd_last_transfer_tick = tick_counter;
 
+    // Reset split state for fresh transfer
+    split_nyet_count = 0;
+    split_start_frame = 0;
+
+    // Configure split transactions if keyboard is FS/LS behind HS hub
+    usb_set_split_if_needed(ch, addr);
+
     // Configure channel for interrupt IN endpoint
     uint32_t mps = 64;  // Full speed max
     uint32_t hcchar = (mps & HCCHAR_MPS_MASK) |
@@ -133,10 +160,9 @@ static void usb_do_keyboard_transfer(void) {
     dsb();
 
     // Configure channel interrupts
-    // Only enable CHHLTD (channel halted) - we check HCINT for details
-    // This minimizes interrupts: one per transfer, not one per NAK
+    // Enable CHHLTD (channel halted), NYET (for split transactions), and errors
     HCINT(ch) = 0xFFFFFFFF;
-    HCINTMSK(ch) = HCINT_CHHLTD | HCINT_XACTERR | HCINT_BBLERR;
+    HCINTMSK(ch) = HCINT_CHHLTD | HCINT_NYET | HCINT_XACTERR | HCINT_BBLERR;
     HCDMA(ch) = arm_to_bus(intr_dma_buffer);
     HCCHAR(ch) = hcchar;
 
@@ -216,6 +242,11 @@ void usb_irq_handler(void) {
                 if (ch == 1 && usb_state.keyboard_addr != 0) {
                     debug_stats.kbd_irq_count++;
 
+                    // Check split transaction state
+                    uint32_t hcsplt = HCSPLT(ch);
+                    int split_enabled = (hcsplt & HCSPLT_SPLITENA) != 0;
+                    int in_compsplt = (hcsplt & HCSPLT_COMPSPLT) != 0;
+
                     if (hcint & HCINT_XFERCOMPL) {
                         // Transfer complete with data
                         keyboard_data_toggle = !keyboard_data_toggle;
@@ -229,30 +260,108 @@ void usb_irq_handler(void) {
                             kbd_ring_push(intr_dma_buffer);
                             debug_stats.kbd_data_count++;
                         }
-                    }
-                    else if ((hcint & HCINT_CHHLTD) && (hcint & HCINT_ACK)) {
-                        // Got ACK with halt - data received
-                        keyboard_data_toggle = !keyboard_data_toggle;
-
-                        // CRITICAL: Invalidate cache to read fresh DMA data
-                        invalidate_data_cache_range((uintptr_t)intr_dma_buffer, 8);
-
-                        uint32_t remaining = HCTSIZ(1) & HCTSIZ_XFERSIZE_MASK;
-                        int received = 8 - remaining;
-                        if (received > 0) {
-                            kbd_ring_push(intr_dma_buffer);
-                            debug_stats.kbd_data_count++;
+                        // Clear COMPSPLT for next transfer
+                        if (split_enabled) {
+                            HCSPLT(ch) &= ~HCSPLT_COMPSPLT;
                         }
                     }
-                    else if (hcint & HCINT_NAK) {
-                        // NAK = no data available (normal for HID when no key pressed)
-                        debug_stats.kbd_nak_count++;
+                    else if (hcint & HCINT_CHHLTD) {
+                        // Channel halted - handle split transaction 2-phase state machine
+
+                        if (split_enabled) {
+                            // PHASE 1: Start-split phase (COMPSPLT == 0)
+                            // ACK or NYET means transition to complete-split
+                            if (!in_compsplt && (hcint & (HCINT_ACK | HCINT_NYET))) {
+                                HCINT(ch) = 0xFFFFFFFF;
+                                HCSPLT(ch) |= HCSPLT_COMPSPLT;  // Transition to complete-split
+                                split_start_frame = HFNUM & 0xFFFF;  // Record frame for timing
+                                split_nyet_count = 0;  // Reset NYET counter
+                                dsb();
+                                // Don't re-enable immediately - let timer tick handle it
+                                // This gives TT time to do the FS transaction (~1ms)
+                                continue;  // Stay in split flow, don't restart transfer
+                            }
+
+                            // PHASE 2: Complete-split phase (COMPSPLT == 1)
+                            // NYET means hub TT not ready yet, retry complete-split
+                            if (in_compsplt && (hcint & HCINT_NYET)) {
+                                HCINT(ch) = 0xFFFFFFFF;
+                                split_nyet_count++;
+                                debug_stats.kbd_nyet_count++;
+
+                                // Check if too many NYETs - abort and restart fresh
+                                if (split_nyet_count >= MAX_SPLIT_NYET_RETRIES) {
+                                    debug_stats.kbd_error_count++;
+                                    HCSPLT(ch) &= ~HCSPLT_COMPSPLT;  // Clear for fresh start
+                                    split_nyet_count = 0;
+                                    // Fall through to restart transfer
+                                } else {
+                                    // Check if enough frames have passed since start-split
+                                    uint16_t current_frame = HFNUM & 0xFFFF;
+                                    uint16_t frames_elapsed = (current_frame - split_start_frame) & 0x3FFF;
+
+                                    if (frames_elapsed >= SPLIT_FRAME_WAIT) {
+                                        // Enough time passed, retry complete-split
+                                        kbd_reenable_channel(ch);
+                                    }
+                                    // Otherwise don't re-enable - timer tick will handle it
+                                    continue;  // Stay in split flow
+                                }
+                            }
+
+                            // Complete-split with ACK means data received (success)
+                            if (in_compsplt && (hcint & HCINT_ACK)) {
+                                keyboard_data_toggle = !keyboard_data_toggle;
+
+                                // CRITICAL: Invalidate cache to read fresh DMA data
+                                invalidate_data_cache_range((uintptr_t)intr_dma_buffer, 8);
+
+                                uint32_t remaining = HCTSIZ(1) & HCTSIZ_XFERSIZE_MASK;
+                                int received = 8 - remaining;
+                                if (received > 0) {
+                                    kbd_ring_push(intr_dma_buffer);
+                                    debug_stats.kbd_data_count++;
+                                }
+                                HCSPLT(ch) &= ~HCSPLT_COMPSPLT;
+                                // Fall through to restart transfer
+                            }
+                            // NAK during split - clear and restart
+                            else if (hcint & HCINT_NAK) {
+                                debug_stats.kbd_nak_count++;
+                                HCSPLT(ch) &= ~HCSPLT_COMPSPLT;
+                            }
+                            // Error during split
+                            else if (hcint & (HCINT_STALL | HCINT_XACTERR | HCINT_BBLERR)) {
+                                debug_stats.kbd_error_count++;
+                                HCSPLT(ch) &= ~HCSPLT_COMPSPLT;
+                            }
+                        } else {
+                            // Non-split transaction
+                            if (hcint & HCINT_ACK) {
+                                // Got ACK with halt - data received
+                                keyboard_data_toggle = !keyboard_data_toggle;
+
+                                // CRITICAL: Invalidate cache to read fresh DMA data
+                                invalidate_data_cache_range((uintptr_t)intr_dma_buffer, 8);
+
+                                uint32_t remaining = HCTSIZ(1) & HCTSIZ_XFERSIZE_MASK;
+                                int received = 8 - remaining;
+                                if (received > 0) {
+                                    kbd_ring_push(intr_dma_buffer);
+                                    debug_stats.kbd_data_count++;
+                                }
+                            }
+                            else if (hcint & HCINT_NAK) {
+                                // NAK = no data available (normal for HID when no key pressed)
+                                debug_stats.kbd_nak_count++;
+                            }
+                            else if (hcint & (HCINT_STALL | HCINT_XACTERR | HCINT_BBLERR)) {
+                                // Error - increment counter (no printf!)
+                                debug_stats.kbd_error_count++;
+                            }
+                        }
                     }
-                    else if (hcint & (HCINT_STALL | HCINT_XACTERR | HCINT_BBLERR)) {
-                        // Error - increment counter (no printf!)
-                        debug_stats.kbd_error_count++;
-                    }
-                    // Note: CHHLTD alone (without NAK/ACK/XFERCOMPL) can happen - just means halt
+                    // Note: Other cases (CHHLTD without specific bits) just fall through
 
                     // Clear channel interrupt first
                     HCINT(ch) = 0xFFFFFFFF;
@@ -353,6 +462,20 @@ void hal_usb_keyboard_tick(void) {
         return;
     }
 
+    // Handle split transaction waiting (ISR deferred complete-split)
+    // Check if channel 1 is in complete-split state but not enabled
+    if ((HCSPLT(1) & HCSPLT_COMPSPLT) && !(HCCHAR(1) & HCCHAR_CHENA)) {
+        uint16_t current_frame = HFNUM & 0xFFFF;
+        uint16_t frames_elapsed = (current_frame - split_start_frame) & 0x3FFF;
+
+        // At 10ms tick rate, we're definitely past the ~1ms FS transaction time
+        // Re-enable channel to issue complete-split
+        if (frames_elapsed >= SPLIT_FRAME_WAIT) {
+            kbd_reenable_channel(1);
+        }
+        return;  // Don't do watchdog while in split flow
+    }
+
     // WATCHDOG: If no successful transfer in 50ms (5 ticks), force restart
     if (kbd_transfer_pending &&
         (tick_counter - kbd_last_transfer_tick) >= 5) {
@@ -369,6 +492,11 @@ void hal_usb_keyboard_tick(void) {
             }
             HCINT(1) = 0xFFFFFFFF;
         }
+
+        // Clear any split transaction state
+        HCSPLT(1) &= ~HCSPLT_COMPSPLT;
+        split_nyet_count = 0;
+        split_start_frame = 0;
 
         kbd_transfer_pending = 0;
         usb_do_keyboard_transfer();

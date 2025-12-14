@@ -17,6 +17,7 @@ typedef struct {
     volatile uint32_t kbd_irq_count;    // Keyboard channel IRQs
     volatile uint32_t kbd_data_count;   // Successful data transfers
     volatile uint32_t kbd_nak_count;    // NAK responses (normal)
+    volatile uint32_t kbd_nyet_count;   // NYET responses (split transaction)
     volatile uint32_t kbd_error_count;  // Transfer errors
     volatile uint32_t kbd_restart_count; // Transfer restarts
     volatile uint32_t port_irq_count;   // Port change IRQs

@@ -1378,3 +1378,34 @@ Session 44: USB Keyboard Working on Real Pi Hardware!
   - `kernel/kapi.c/h` - exposed klog functions
   - `user/lib/vibe.h` - kapi struct updated
   - `Makefile` - added dmesg to USER_PROGS
+
+### Session 50
+- **USB Hub Fix - Full-Speed Device Behind High-Speed Hub**
+- **Problem:** FS keyboard on HS hub port caused infinite NYET loop during enumeration
+- **Symptoms:**
+  - Hub detected as HS, enumerated fine
+  - Device on hub port 4 detected as FS
+  - Split transactions enabled (required for FS behind HS hub)
+  - Start-split got ACK (hub TT accepted transaction)
+  - Complete-split got NYET forever (TT never completed downstream transaction)
+- **Investigation:**
+  1. First suspected timing - USB msleep() was using ARM generic timer (`cntfrq_el0`/`cntpct_el0`) which wasn't working
+  2. Fixed by enabling interrupts before USB init, using kernel's `sleep_ms()` instead
+  3. Timing was now correct (~10ms delays) but NYET loop persisted
+  4. Split transaction state machine looked correct per USB spec
+  5. TT just never completed the FS transaction to downstream device
+- **Solution:** Force Full-Speed only mode with `HCFG_FSLSUPP`
+  - Set `HCFG = HCFG_FSLSPCLKSEL_30_60 | HCFG_FSLSUPP`
+  - Hub now connects at FS instead of HS
+  - No split transactions needed - direct FS communication
+  - Trade-off: 12 Mbps instead of 480 Mbps (irrelevant for keyboard/mouse)
+- **Other fixes along the way:**
+  - `kernel/kernel.c` - Enable interrupts before USB init (was too late)
+  - `kernel/hal/pizero2w/usb/dwc2_core.c` - msleep() now uses kernel's sleep_ms()
+  - `kernel/hal/pizero2w/usb/usb_hid.c` - Added NYET retry limits and frame-based waiting for IRQ path
+- **Files modified:**
+  - `kernel/kernel.c` - hal_irq_enable() before hal_usb_init()
+  - `kernel/hal/pizero2w/usb/dwc2_core.c` - HCFG_FSLSUPP, fixed msleep/usleep
+  - `kernel/hal/pizero2w/usb/usb_hid.c` - split transaction state tracking
+  - `kernel/hal/pizero2w/usb/usb_hid.h` - added kbd_nyet_count to stats
+- **Lesson learned:** For HID devices, FS is perfectly adequate. HS split transactions add complexity with little benefit for low-bandwidth devices.
