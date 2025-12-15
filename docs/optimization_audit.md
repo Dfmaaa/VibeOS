@@ -842,12 +842,14 @@ malloc(PROCESS_STACK_SIZE);              // Allocate 1MB stack
 5. **VFS partial read** - 3500x faster file reads (was re-reading entire file per chunk!)
 6. **DMA for SD card** - Multi-block reads use DMA
 7. **FAT cache** - Increased 8→64 sectors
+8. **Console line buffering** - Text drawn to cached RAM, DMA to FB (~20% faster)
 
 ### Remaining Optimization Opportunities
 
 **High Impact (P1)**:
 - **Sysmon** - Add O(1) memory stat counters (Finding #11)
 - **DMA fill** - Implemented, works in desktop, cache issues in term/console (Finding #1)
+- **Console scroll** - Still slow (memset32/memmove to uncached FB). DMA caused cache artifacts.
 
 **Medium Impact (P2)**:
 - **FAT32 caching** - Track free cluster count (Finding #3)
@@ -855,3 +857,10 @@ malloc(PROCESS_STACK_SIZE);              // Allocate 1MB stack
 
 **Lower Priority (P3)**:
 - **Memory allocator bins** - Segregated free lists (Finding #5)
+
+### Notes on Console Optimization (Session 55)
+- Character drawing now uses line buffer in cached RAM + DMA 2D copy
+- Bottleneck shifted from character drawing to scroll operations
+- Scroll still does memset32 (51KB) + occasional memmove (1.92MB) to uncached FB
+- DMA for scroll was attempted but caused GPU cache coherency issues (visual artifacts)
+- Current state: ~20% improvement (47s → 38s for hexdump)

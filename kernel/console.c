@@ -39,6 +39,14 @@ static char *text_buffer = NULL;
 static uint32_t *fg_buffer = NULL;
 static uint32_t *bg_buffer = NULL;
 
+// Line buffer for batched rendering
+// Framebuffer is non-cacheable on Pi, so we draw to cached RAM first
+#define LINE_BUF_WIDTH 800
+static uint32_t line_buffer[LINE_BUF_WIDTH * FONT_HEIGHT] __attribute__((aligned(64)));
+static int line_buf_row = -1;      // Which row is buffered (-1 = none)
+static int line_buf_min_col = -1;  // Leftmost column drawn
+static int line_buf_max_col = -1;  // Rightmost column drawn
+
 void console_init(void) {
     if (fb_base == NULL) return;
 
@@ -64,14 +72,74 @@ void console_init(void) {
     console_initialized = 1;
 }
 
+// Flush only the drawn portion of line buffer to framebuffer
+static void line_buf_flush(void) {
+    if (line_buf_row < 0 || line_buf_min_col < 0) return;
+
+    // Calculate pixel region to copy
+    uint32_t x_start = line_buf_min_col * FONT_WIDTH;
+    uint32_t x_end = (line_buf_max_col + 1) * FONT_WIDTH;
+    uint32_t width_bytes = (x_end - x_start) * sizeof(uint32_t);
+    uint32_t y_fb = scroll_offset + line_buf_row * FONT_HEIGHT;
+
+    uint32_t *src = &line_buffer[x_start];
+    uint32_t *dst = &fb_base[y_fb * fb_width + x_start];
+
+    // Use 2D DMA if available - single operation instead of 16 memcpys
+    if (hal_dma_available()) {
+        hal_dma_copy_2d(dst, fb_width * sizeof(uint32_t),
+                        src, LINE_BUF_WIDTH * sizeof(uint32_t),
+                        width_bytes, FONT_HEIGHT);
+    } else {
+        // Fallback: 16 separate copies
+        for (int row = 0; row < FONT_HEIGHT; row++) {
+            memcpy(dst, src, width_bytes);
+            src += LINE_BUF_WIDTH;
+            dst += fb_width;
+        }
+    }
+
+    line_buf_min_col = -1;
+    line_buf_max_col = -1;
+}
+
+// Draw character to line buffer (cached RAM)
 static void draw_char_at(int row, int col, char c) {
+    // If switching rows, flush old row first
+    if (row != line_buf_row && line_buf_row >= 0) {
+        line_buf_flush();
+    }
+    line_buf_row = row;
+
+    // Draw character into line buffer
     uint32_t x = col * FONT_WIDTH;
-    // With hardware scroll, visible row 0 is at scroll_offset in the framebuffer
-    uint32_t y = scroll_offset + row * FONT_HEIGHT;
-    fb_draw_char(x, y, c, fg_color, bg_color);
+    if (x + FONT_WIDTH > LINE_BUF_WIDTH) return;
+
+    const uint8_t *glyph = font_data[(uint8_t)c];
+
+    for (int r = 0; r < FONT_HEIGHT; r++) {
+        uint32_t *row_ptr = &line_buffer[r * LINE_BUF_WIDTH + x];
+        uint8_t bits = glyph[r];
+        row_ptr[0] = (bits & 0x80) ? fg_color : bg_color;
+        row_ptr[1] = (bits & 0x40) ? fg_color : bg_color;
+        row_ptr[2] = (bits & 0x20) ? fg_color : bg_color;
+        row_ptr[3] = (bits & 0x10) ? fg_color : bg_color;
+        row_ptr[4] = (bits & 0x08) ? fg_color : bg_color;
+        row_ptr[5] = (bits & 0x04) ? fg_color : bg_color;
+        row_ptr[6] = (bits & 0x02) ? fg_color : bg_color;
+        row_ptr[7] = (bits & 0x01) ? fg_color : bg_color;
+    }
+
+    // Track drawn region
+    if (line_buf_min_col < 0 || col < line_buf_min_col) line_buf_min_col = col;
+    if (col > line_buf_max_col) line_buf_max_col = col;
 }
 
 static void scroll_up(void) {
+    // Flush line buffer before scrolling
+    line_buf_flush();
+    line_buf_row = -1;
+
     uint32_t line_pixels = fb_width * FONT_HEIGHT;
 
     if (!hw_scroll_available) {
@@ -89,20 +157,18 @@ static void scroll_up(void) {
     // Check if we need to wrap around
     if (scroll_offset + FONT_HEIGHT > max_offset) {
         // Copy visible portion back to top of buffer, then reset offset
-        // scroll_offset is Y pixels, so multiply by fb_width to get pixel index
         memmove(fb_base, fb_base + scroll_offset * fb_width, fb_height * fb_width * sizeof(uint32_t));
         scroll_offset = 0;
-        // Don't set GPU offset here - we'll set it once at the end
     }
 
     // Scroll by one line
     scroll_offset += FONT_HEIGHT;
 
-    // Clear the new bottom line (it contains stale data from previous wrap)
+    // Clear the new bottom line
     uint32_t new_bottom_y = scroll_offset + fb_height - FONT_HEIGHT;
     memset32(fb_base + new_bottom_y * fb_width, bg_color, line_pixels);
 
-    // Update GPU display offset (single update, even after wrap)
+    // Update GPU display offset
     hal_fb_set_scroll_offset(scroll_offset);
 }
 
@@ -184,9 +250,16 @@ void console_puts(const char *s) {
     while (*s) {
         console_putc(*s++);
     }
+    // Flush for immediate display
+    line_buf_flush();
 }
 
 void console_clear(void) {
+    // Discard any pending line buffer
+    line_buf_row = -1;
+    line_buf_min_col = -1;
+    line_buf_max_col = -1;
+
     // Reset scroll offset when clearing
     if (hw_scroll_available) {
         scroll_offset = 0;
@@ -200,6 +273,12 @@ void console_clear(void) {
 // Fast clear from cursor position to end of line using fb_fill_rect
 void console_clear_to_eol(void) {
     if (!console_initialized || fb_base == NULL) return;
+
+    // Flush line buffer if on this row
+    if (line_buf_row == cursor_row) {
+        line_buf_flush();
+        line_buf_row = -1;
+    }
 
     // Hide cursor before clearing
     if (cursor_visible) {
@@ -231,6 +310,12 @@ void console_clear_region(int row, int col, int width, int height) {
     if (row + height > num_rows) height = num_rows - row;
     if (col + width > num_cols) width = num_cols - col;
     if (width <= 0 || height <= 0) return;
+
+    // Flush line buffer if it overlaps
+    if (line_buf_row >= row && line_buf_row < row + height) {
+        line_buf_flush();
+        line_buf_row = -1;
+    }
 
     // Hide cursor if it's in the region
     if (cursor_visible) {
@@ -287,6 +372,11 @@ int console_cols(void) {
 static void draw_cursor(int show) {
     if (!console_initialized || fb_base == NULL) return;
     if (show == cursor_visible) return;  // Already in desired state
+
+    // Flush line buffer if cursor is on buffered row
+    if (line_buf_row == cursor_row) {
+        line_buf_flush();
+    }
 
     uint32_t x = cursor_col * FONT_WIDTH;
     // Account for hardware scroll offset

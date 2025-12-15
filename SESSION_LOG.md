@@ -1699,3 +1699,39 @@ Session 44: USB Keyboard Working on Real Pi Hardware!
 - `user/bin/vibesh.c` - `time` builtin command
 - `user/bin/readtest.c` - New benchmark tool
 - `Makefile` - Added readtest
+
+## Session 55: Console Text Rendering Optimization
+
+**Goal**: Speed up console text output (hexdump was taking 47s, framebuffer-bound).
+
+### The Problem
+- Framebuffer is mapped as **non-cacheable device memory** for GPU coherency
+- Every pixel write goes directly to slow RAM (~100 cycles vs ~2 for cached)
+- `fb_draw_char()` does 128 pixel writes per character
+- For hexdump outputting thousands of lines, millions of slow uncached writes
+
+### Solution: Line Buffer with DMA
+- Added line buffer in cached RAM (800 × 16 pixels = 51KB)
+- Characters drawn to cached buffer (fast L1/L2 cache writes)
+- Track min/max columns actually drawn per line
+- On newline/flush: single DMA 2D copy of only the drawn region to framebuffer
+
+### Key Implementation Details
+- `line_buffer[]` - Cached RAM buffer for one text line
+- `line_buf_row`, `line_buf_min_col`, `line_buf_max_col` - Tracking state
+- `line_buf_flush()` - Uses `hal_dma_copy_2d()` for strided copy
+- `draw_char_at()` - Writes to line buffer, tracks dirty region
+- Flush points: newline, scroll, cursor draw, explicit (end of puts)
+
+### What Didn't Work
+1. **First attempt**: memset32 entire buffer on each new line = 51KB overhead per line, made things 10x slower!
+2. **DMA for scroll operations**: Cache coherency issues with GPU framebuffer, caused visual artifacts (squiggly lines)
+
+### Results
+- hexdump /bin/ls: **47s → 38s** (~20% improvement)
+- Bottleneck shifted from character drawing to scroll operations
+- Further DMA optimization for scroll caused cache issues, reverted
+
+### Files Modified
+- `kernel/console.c` - Line buffering implementation
+
