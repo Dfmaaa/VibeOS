@@ -31,6 +31,11 @@ typedef struct block_header {
 
 static block_header_t *free_list = NULL;
 
+// O(1) counters - updated on malloc/free instead of scanning
+static size_t stat_used = 0;      // Total bytes in use (including headers)
+static size_t stat_free = 0;      // Total bytes free
+static int stat_alloc_count = 0;  // Number of active allocations
+
 // Defined in linker script - end of BSS in RAM
 extern uint64_t _bss_end;
 
@@ -86,6 +91,11 @@ void memory_init(void) {
     free_list->size = heap_end - heap_start - HEADER_SIZE;
     free_list->is_free = 1;
     free_list->next = NULL;
+
+    // Initialize O(1) counters
+    stat_used = 0;
+    stat_free = free_list->size;
+    stat_alloc_count = 0;
 }
 
 void *malloc(size_t size) {
@@ -100,6 +110,7 @@ void *malloc(size_t size) {
     while (current != NULL) {
         if (current->is_free && current->size >= size) {
             // Found a suitable block
+            size_t old_size = current->size;
 
             // Split if there's enough room for another block
             if (current->size >= size + HEADER_SIZE + 16) {
@@ -111,9 +122,18 @@ void *malloc(size_t size) {
 
                 current->size = size;
                 current->next = new_block;
+
+                // Update counters: we used size+header, free lost size+header
+                stat_used += size + HEADER_SIZE;
+                stat_free -= size + HEADER_SIZE;
+            } else {
+                // No split: entire block becomes used
+                stat_used += old_size + HEADER_SIZE;
+                stat_free -= old_size;
             }
 
             current->is_free = 0;
+            stat_alloc_count++;
             return (void *)((uint8_t *)current + HEADER_SIZE);
         }
         current = current->next;
@@ -128,13 +148,20 @@ void free(void *ptr) {
 
     // Get header
     block_header_t *block = (block_header_t *)((uint8_t *)ptr - HEADER_SIZE);
+
+    // Update counters before marking free
+    stat_used -= block->size + HEADER_SIZE;
+    stat_free += block->size;
+    stat_alloc_count--;
+
     block->is_free = 1;
 
     // Coalesce adjacent free blocks
     block_header_t *current = free_list;
     while (current != NULL) {
         if (current->is_free && current->next != NULL && current->next->is_free) {
-            // Merge with next block
+            // Merge with next block - reclaim header space
+            stat_free += HEADER_SIZE;
             current->size += HEADER_SIZE + current->next->size;
             current->next = current->next->next;
             // Don't advance - check if we can merge again
@@ -185,27 +212,11 @@ void *realloc(void *ptr, size_t size) {
 }
 
 size_t memory_used(void) {
-    size_t used = 0;
-    block_header_t *current = free_list;
-    while (current != NULL) {
-        if (!current->is_free) {
-            used += current->size + HEADER_SIZE;
-        }
-        current = current->next;
-    }
-    return used;
+    return stat_used;  // O(1) - no scanning!
 }
 
 size_t memory_free(void) {
-    size_t free_mem = 0;
-    block_header_t *current = free_list;
-    while (current != NULL) {
-        if (current->is_free) {
-            free_mem += current->size;
-        }
-        current = current->next;
-    }
-    return free_mem;
+    return stat_free;  // O(1) - no scanning!
 }
 
 uint64_t memory_heap_start(void) {
@@ -223,13 +234,5 @@ uint64_t memory_get_sp(void) {
 }
 
 int memory_alloc_count(void) {
-    int count = 0;
-    block_header_t *current = free_list;
-    while (current != NULL) {
-        if (!current->is_free) {
-            count++;
-        }
-        current = current->next;
-    }
-    return count;
+    return stat_alloc_count;  // O(1) - no scanning!
 }

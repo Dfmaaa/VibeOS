@@ -35,6 +35,13 @@ static int last_proc_count = 0;
 static int last_sound_state = 0;  // 0=idle, 1=playing, 2=paused
 static int needs_redraw = 1;
 
+// Cached stats - fetched once in check_for_changes, reused in draw_all
+static unsigned long cached_ticks = 0;
+static size_t cached_mem_used = 0;
+static size_t cached_mem_free = 0;
+static int cached_alloc_count = 0;
+static int cached_proc_count = 0;
+
 // Drawing macros
 #define buf_fill_rect(x, y, w, h, c)     gfx_fill_rect(&gfx, x, y, w, h, c)
 #define buf_draw_char(x, y, ch, fg, bg)  gfx_draw_char(&gfx, x, y, ch, fg, bg)
@@ -224,9 +231,8 @@ static void draw_all(void) {
     draw_section_header(y + 4, "Overview");
     y += 16;
 
-    // Uptime
-    unsigned long ticks = api->get_uptime_ticks();
-    format_uptime(buf, ticks);
+    // Uptime (use cached value)
+    format_uptime(buf, cached_ticks);
     draw_label_value(y, "Uptime:", buf);
     y += 16;
 
@@ -247,17 +253,15 @@ static void draw_all(void) {
     draw_label_value(y, "RAM Total:", buf);
     y += 16;
 
-    // Heap used/free
-    size_t mem_used = api->get_mem_used();
-    size_t mem_free = api->get_mem_free();
-    size_t mem_total = mem_used + mem_free;
-    int mem_percent = (int)((mem_used * 100) / mem_total);
+    // Heap used/free (use cached values)
+    size_t mem_total = cached_mem_used + cached_mem_free;
+    int mem_percent = mem_total ? (int)((cached_mem_used * 100) / mem_total) : 0;
 
-    format_size_mb(buf, mem_used);
+    format_size_mb(buf, cached_mem_used);
     draw_label_value(y, "Heap Used:", buf);
     y += 16;
 
-    format_size_mb(buf, mem_free);
+    format_size_mb(buf, cached_mem_free);
     draw_label_value(y, "Heap Free:", buf);
     y += 16;
 
@@ -300,9 +304,8 @@ static void draw_all(void) {
     draw_label_value(y, "Stack Ptr:", buf);
     y += 16;
 
-    // Allocation count
-    int alloc_count = api->get_alloc_count();
-    format_num(buf, alloc_count);
+    // Allocation count (use cached value)
+    format_num(buf, cached_alloc_count);
     draw_label_value(y, "Allocs:", buf);
     y += 20;
 
@@ -319,8 +322,8 @@ static void draw_all(void) {
     draw_section_header(y + 4, "Processes");
     y += 16;
 
-    int proc_count = api->get_process_count();
-    format_num(buf, proc_count);
+    // Use cached process count
+    format_num(buf, cached_proc_count);
     strcat(buf, " active");
     draw_label_value(y, "Count:", buf);
     y += 16;
@@ -367,13 +370,16 @@ static void draw_all(void) {
     api->window_invalidate(window_id);
 }
 
-// Check if any displayed values changed
+// Check if any displayed values changed - also populates cache for draw_all
 static void check_for_changes(void) {
-    // Get current values
-    unsigned long ticks = api->get_uptime_ticks();
-    unsigned long current_sec = ticks / 100;
-    size_t mem_used = api->get_mem_used();
-    int proc_count = api->get_process_count();
+    // Fetch all stats ONCE and cache them
+    cached_ticks = api->get_uptime_ticks();
+    cached_mem_used = api->get_mem_used();
+    cached_mem_free = api->get_mem_free();
+    cached_alloc_count = api->get_alloc_count();
+    cached_proc_count = api->get_process_count();
+
+    unsigned long current_sec = cached_ticks / 100;
 
     int sound_state = 0;  // idle
     if (api->sound_is_playing && api->sound_is_playing()) {
@@ -384,13 +390,13 @@ static void check_for_changes(void) {
 
     // Check if anything changed
     if (current_sec != last_uptime_sec ||
-        mem_used != last_mem_used ||
-        proc_count != last_proc_count ||
+        cached_mem_used != last_mem_used ||
+        cached_proc_count != last_proc_count ||
         sound_state != last_sound_state) {
         needs_redraw = 1;
         last_uptime_sec = current_sec;
-        last_mem_used = mem_used;
-        last_proc_count = proc_count;
+        last_mem_used = cached_mem_used;
+        last_proc_count = cached_proc_count;
         last_sound_state = sound_state;
     }
 }
@@ -520,8 +526,12 @@ int main(kapi_t *kapi, int argc, char **argv) {
     // Initialize graphics context
     gfx_init(&gfx, win_buffer, win_w, win_h, api->font_data);
 
+    // Populate cache before initial draw
+    check_for_changes();
+
     // Initial draw
     draw_all();
+    needs_redraw = 0;
 
     // Event loop - only redraw when data changes
     int running = 1;
