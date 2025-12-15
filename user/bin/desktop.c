@@ -309,9 +309,13 @@ static int wm_window_create(int x, int y, int w, int h, const char *title) {
         return -1;
     }
 
-    // Clear to white
-    for (int j = 0; j < w * content_h; j++) {
-        win->buffer[j] = COLOR_WIN_BG;
+    // Clear to white (use DMA if available for speed)
+    if (api->dma_fill) {
+        api->dma_fill(win->buffer, COLOR_WIN_BG, w * content_h * sizeof(uint32_t));
+    } else {
+        for (int j = 0; j < w * content_h; j++) {
+            win->buffer[j] = COLOR_WIN_BG;
+        }
     }
 
     // Add to z-order (at front)
@@ -1286,9 +1290,13 @@ static void handle_mouse_release(int x, int y) {
             api->free(w->buffer);
             w->buffer = new_buffer;
 
-            // Clear new buffer to white
-            for (int i = 0; i < w->w * content_h; i++) {
-                w->buffer[i] = COLOR_WHITE;
+            // Clear new buffer to white (use DMA if available)
+            if (api->dma_fill) {
+                api->dma_fill(w->buffer, COLOR_WHITE, w->w * content_h * sizeof(uint32_t));
+            } else {
+                for (int i = 0; i < w->w * content_h; i++) {
+                    w->buffer[i] = COLOR_WHITE;
+                }
             }
 
             // Send resize event to app (data1=new width, data2=new height)
@@ -1515,9 +1523,13 @@ int main(kapi_t *kapi, int argc, char **argv) {
         api->yield();
     }
 
-    // Cleanup - clear screen to black and restore console
-    for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
-        api->fb_base[i] = COLOR_BLACK;
+    // Cleanup - clear screen to black and restore console (use DMA if available)
+    if (api->dma_fill) {
+        api->dma_fill(api->fb_base, COLOR_BLACK, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
+    } else {
+        for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
+            api->fb_base[i] = COLOR_BLACK;
+        }
     }
 
     // Reset scroll offset if using hardware double buffering

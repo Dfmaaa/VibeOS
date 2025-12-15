@@ -185,5 +185,6 @@ int hal_dma_copy_2d(void *dst, uint32_t dst_pitch,
                     const void *src, uint32_t src_pitch,
                     uint32_t width, uint32_t height);
 int hal_dma_fb_copy(uint32_t *dst, const uint32_t *src, uint32_t width, uint32_t height);
+int hal_dma_fill(void *dst, uint32_t value, uint32_t len);
 
 #endif // HAL_H

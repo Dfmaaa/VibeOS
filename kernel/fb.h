@@ -32,6 +32,7 @@ void fb_clear(uint32_t color);
 
 // Text drawing
 void fb_draw_char(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg);
+void fb_draw_char_fg_only(uint32_t x, uint32_t y, char c, uint32_t fg);  // For batch rendering
 void fb_draw_string(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t bg);
 
 // Hardware double buffering (Pi only)

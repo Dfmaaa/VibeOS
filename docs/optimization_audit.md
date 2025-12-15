@@ -11,12 +11,15 @@
 **D-CACHE NOW ENABLED** - System is ~50-100x faster. Remaining issues:
 
 1. ✅ ~~DATA CACHE DISABLED~~ - **FIXED**
-2. **Random hangs** - Infinite loops without timeouts in mailbox/DMA waits
-3. **Flicker on fast redraws** - Need vsync before buffer flip
-4. **Desktop bugs** - Various UI issues remain
-5. **FAT32 has O(n) algorithms** - File ops still slow
-6. **No dirty rectangle tracking** - Full screen redraws on hover
-7. **Memory allocator is O(n)** - Every malloc/free scans the heap
+2. ✅ ~~Random hangs~~ - **FIXED** (timeouts added to mailbox/DMA waits)
+3. ✅ ~~Flicker on fast redraws~~ - **FIXED** (vsync added)
+4. ✅ ~~Desktop dirty tracking~~ - **FIXED**
+5. **DMA not used** - Framebuffer and SD still use CPU loops
+6. **FAT32 has O(n) algorithms** - File ops still slow
+7. **VFS layer inefficiencies** - Partial reads load entire file
+8. **Memory allocator is O(n)** - Every malloc/free scans the heap
+9. **Scheduler is O(n)** - Scans all process slots in IRQ
+10. **Sysmon kills performance** - 6+ heap scans per frame
 
 ---
 
@@ -81,7 +84,7 @@ memmove(fb_base, fb_base + line_pixels, ...);
 - Terminal: Visible lag on scroll
 
 ### Fix
-1. `hal_dma_fill()` - Add DMA fill operation for solid colors
+1. ~~`hal_dma_fill()` - Add DMA fill operation for solid colors~~ **DONE** (partial - works in desktop, cache issues in term/console)
 2. Use `hal_dma_copy_2d()` for rectangle fills
 3. Use `hal_dma_copy()` for scroll operations
 4. Batch character rendering to temp buffer, DMA to screen
@@ -339,67 +342,11 @@ uint32_t memory_used(void) {
 
 ---
 
-## Critical Finding #6: Desktop Has No Dirty Tracking
+## ✅ Critical Finding #6: Desktop Dirty Tracking - FIXED
 
-### Problem
-Desktop redraws the entire screen on virtually any change.
+**Status**: COMPLETE (December 2024)
 
-### Evidence
-
-#### Background Redrawn Every Frame (user/bin/desktop.c:899-900)
-```c
-// CURRENT: Full checkerboard redraw
-draw_desktop();  // Redraws 800x600 checkerboard pattern
-```
-- Static content, never changes
-- Redrawn at up to 100Hz
-
-#### Menu Bar Recalculated Every Frame (user/bin/desktop.c:619-628)
-```c
-// CURRENT: Time formatting every frame
-format_date(date_buf, ...);
-format_time(time_buf, ...);
-// String length calculations, positioning...
-```
-- Clock only needs update once per second
-- Currently updates at 100Hz
-
-#### Full Dock Redraw on Hover (user/bin/desktop.c:450-465)
-```c
-// CURRENT: All icons redrawn on any hover change
-draw_dock();  // Redraws all 8 icons
-```
-- Only hovered icon highlight changed
-- 8 × 32×32 = 8192 pixels redrawn
-
-#### Icon Rendering is Per-Pixel (user/bin/desktop.c:206-216)
-```c
-// CURRENT: 1024 put_pixel calls per icon
-for (int y = 0; y < 32; y++) {
-    for (int x = 0; x < 32; x++) {
-        bb_put_pixel(dx + x, dy + y, icon[y * 32 + x]);
-    }
-}
-```
-- No bulk operations
-- 8 icons × 1024 = 8192 function calls
-
-### Impact
-- Idle desktop: Still doing significant work
-- Mouse movement: Full screen redraw
-- Window drag: Catastrophic performance
-
-### Fix
-1. **Dirty rectangle system**
-   - Track changed regions
-   - Only redraw what changed
-2. **Cache static content**
-   - Background rendered once
-   - Menu bar cached, only time updated
-3. **Batch icon rendering**
-   - Use memcpy/DMA for icon blits
-4. **Per-region dirty flags**
-   - `dirty_dock`, `dirty_menubar`, `dirty_windows`
+Desktop now uses dirty rectangle tracking. Only changed regions are redrawn.
 
 ---
 
@@ -646,62 +593,53 @@ case WIN_EVENT_MOUSE_UP:
 
 | Priority | Category | Speedup | Effort | Dependencies |
 |----------|----------|---------|--------|--------------|
-| P0 | DMA for framebuffer | 10-50x | Medium | None |
-| P0 | DMA for SD card | 4-8x | Medium | None |
-| P0 | FAT32 free cluster cache | 100x | Low | None |
-| P1 | VFS partial read | 100x | Medium | FAT32 changes |
-| P1 | Desktop dirty rects | 10x | Medium | None |
-| P1 | Scheduler ready queue | 16x | Medium | None |
-| P2 | Memory allocator bins | 5-10x | High | None |
-| P2 | String SIMD | 2x | Medium | None |
-| P2 | USB barrier reduction | 2x | Low | None |
-| P3 | App dirty tracking | 2-5x each | Per-app | None |
+| ~~P0~~ | ~~Desktop dirty rects~~ | ~~10x~~ | ~~Medium~~ | ✅ DONE |
+| P1 | DMA fill (fix cache issues) | 10-50x | Medium | Works in desktop, broken in term/console |
+| P1 | DMA for SD card | 4-8x | Medium | None |
+| P1 | Sysmon O(1) counters | 10x | Low | None |
+| P2 | FAT32 free cluster cache | 100x | Low | None |
+| P2 | VFS partial read | 100x | Medium | FAT32 changes |
+| P2 | Scheduler ready queue | 16x | Medium | None |
+| P3 | Memory allocator bins | 5-10x | High | None |
 
 ---
 
 ## Recommended Attack Plan
 
-### Phase 1: DMA Everything (Week 1)
+### ✅ Phase 1: Critical Fixes - DONE
+- D-cache enabled
+- Infinite loop timeouts added
+- Vsync implemented
+- Desktop dirty tracking
+
+### Phase 2: DMA Acceleration
 **Goal**: Use the DMA hardware we already initialize
 
-1. Add `hal_dma_fill()` for solid color fills
+1. Use `hal_dma_fill()` for framebuffer clears
 2. Update `fb_fill_rect()` to use 2D DMA
-3. Update `fb_clear()` to use DMA fill
-4. Update `console.c` scroll to use DMA copy
-5. Add DMA to EMMC driver for block transfers
+3. Update `console.c` scroll to use DMA copy
+4. Add DMA to EMMC driver for block transfers
 
-**Expected Result**: 10-50x faster screen operations
+**Expected Result**: 10-50x faster screen and disk operations
 
-### Phase 2: Fix FAT32 (Week 2)
+### Phase 3: FAT32 Improvements
 **Goal**: Eliminate O(n) scans
 
 1. Cache free cluster count in memory
 2. Track last-allocated cluster position
 3. Increase FAT cache to 32 sectors
-4. Return entry offset from directory lookups
-5. Batch FAT table writes
+4. Add offset parameter to fat32_read_file() for partial reads
 
 **Expected Result**: 10-100x faster file operations
 
-### Phase 3: Desktop Dirty Tracking (Week 3)
-**Goal**: Only redraw what changed
-
-1. Add dirty flags per region
-2. Cache rendered background
-3. Track window damage rectangles
-4. Implement cursor-only updates
-
-**Expected Result**: 10x faster desktop responsiveness
-
-### Phase 4: System Optimizations (Week 4)
+### Phase 4: System Optimizations
 **Goal**: Core infrastructure improvements
 
-1. Scheduler ready queue
-2. Lazy FPU save/restore
-3. Memory allocator size bins
-4. String function SIMD
+1. Add O(1) memory stat counters (fixes sysmon)
+2. Scheduler ready queue
+3. Lazy FPU save/restore
 
-**Expected Result**: 2-5x faster system operations
+**Expected Result**: 2-10x faster system operations
 
 ---
 
@@ -732,10 +670,10 @@ case WIN_EVENT_MOUSE_UP:
 - Issues: O(n) malloc/free, no bins, O(n) stats
 - Key lines: 100-120 (malloc), 134-144 (free)
 
-### F. Desktop
+### F. Desktop - ✅ FIXED
 - File: `user/bin/desktop.c`
-- Issues: No dirty tracking, per-pixel icons, full redraws
-- Key lines: 899-900 (background), 206-216 (icons)
+- ~~Issues: No dirty tracking, per-pixel icons, full redraws~~
+- **Status**: Dirty tracking implemented
 
 ### G. Scheduler
 - File: `kernel/process.c`
@@ -807,131 +745,19 @@ uint32_t memory_used(void) {
 
 ---
 
-## Critical Finding #12: Dock Hover Triggers Full Screen Redraw
+## ✅ Critical Finding #12: Dock Hover - FIXED
 
-### Problem
-When mouse hovers over a dock icon, the ENTIRE screen is redrawn even though only 1-2 icons changed.
+**Status**: COMPLETE (December 2024)
 
-### Evidence
-
-#### Hover Detection (user/bin/desktop.c:1448-1451)
-```c
-int new_hover = dock_icon_at_point(mouse_x, mouse_y);
-if (new_hover != dock_hovered_icon) {
-    dock_hover_changed = 1;
-    dock_hovered_icon = new_hover;
-}
-```
-
-#### Full Redraw Triggered (user/bin/desktop.c:1475-1476)
-```c
-if (dock_hover_changed) {
-    needs_redraw = 1;  // Triggers FULL screen redraw
-}
-```
-
-#### What Gets Redrawn (user/bin/desktop.c:1492)
-```c
-draw_desktop();  // Redraws:
-                 // - Entire checkerboard background
-                 // - All 8 dock icons
-                 // - Menu bar
-                 // - All windows
-```
-
-#### Then Full Framebuffer Copy (user/bin/desktop.c:934-936)
-```c
-api->dma_fb_copy(api->fb_base, backbuffer, SCREEN_WIDTH, SCREEN_HEIGHT);
-// Copies 1.92 MB even though only ~2KB of pixels changed
-```
-
-### Impact
-- Hovering dock icon causes ~1 second freeze
-- 1.92 MB DMA copy for changing 2 icons (2KB)
-- 1000x more work than necessary
-
-### Fix
-1. Track dirty rectangles - only redraw changed regions
-2. Dock hover should only invalidate dock region
-3. Implement partial buffer copy (only changed areas)
+Fixed as part of desktop dirty tracking implementation.
 
 ---
 
-## Critical Finding #13: Infinite Loops Without Timeouts (HANG CAUSES)
+## ✅ Critical Finding #13: Infinite Loops - FIXED
 
-### Problem
-Multiple Pi drivers have infinite loops that can hang the system permanently if hardware doesn't respond.
+**Status**: COMPLETE (December 2024)
 
-### Evidence
-
-#### Mailbox Read - GPU Communication (kernel/hal/pizero2w/fb.c:96-114)
-```c
-static uint32_t mailbox_read(uint32_t channel) {
-    while (1) {  // INFINITE LOOP - NO TIMEOUT
-        while (MAILBOX_STATUS & MAILBOX_EMPTY) {
-            dmb();
-        }
-        data = MAILBOX_READ;
-        if ((data & 0xF) == channel) {
-            return data;
-        }
-        // If GPU sends wrong channel, loops FOREVER
-    }
-}
-```
-
-#### Same Issue in USB (kernel/hal/pizero2w/usb/dwc2_core.c:115-128)
-```c
-static uint32_t mbox_read(uint32_t channel) {
-    while (1) {  // INFINITE LOOP - NO TIMEOUT
-        // Same pattern as fb.c
-    }
-}
-```
-
-#### DMA Wait (kernel/hal/pizero2w/dma.c:149-157)
-```c
-static void dma_wait(int channel) {
-    while (dma_read(channel, DMA_CS) & DMA_CS_ACTIVE) {
-        dmb();  // NO TIMEOUT - hangs if DMA stalls
-    }
-}
-```
-
-#### Mailbox Write (kernel/hal/pizero2w/fb.c:85-87)
-```c
-while (MAILBOX_STATUS & MAILBOX_FULL) {
-    dmb();  // NO TIMEOUT - hangs if mailbox full
-}
-```
-
-#### usleep Busy Wait (kernel/hal/pizero2w/usb/dwc2_core.c:39-46)
-```c
-void usleep(uint32_t us) {
-    volatile uint32_t *systimer = (volatile uint32_t *)0x3F003004;
-    uint32_t start = *systimer;
-    while ((*systimer - start) < us) {  // Hangs if timer broken
-        asm volatile("nop");
-    }
-}
-```
-
-### Impact
-- **Random permanent hangs** - system completely stops
-- No recovery possible without power cycle
-- Any of these can trigger the freeze
-
-### Fix
-Add timeouts to ALL hardware waits:
-```c
-static uint32_t mailbox_read(uint32_t channel) {
-    int timeout = 100000;
-    while (timeout-- > 0) {
-        // ... existing logic ...
-    }
-    return 0xFFFFFFFF;  // Error indicator
-}
-```
+All hardware waits now have timeouts. Mailbox read/write, DMA wait, and other loops will timeout and return error codes instead of hanging forever.
 
 ---
 
@@ -987,27 +813,39 @@ malloc(PROCESS_STACK_SIZE);              // Allocate 1MB stack
 | Priority | Category | Speedup | Effort | Status |
 |----------|----------|---------|--------|--------|
 | ~~P0~~ | ~~D-CACHE + MMU~~ | ~~100x~~ | ~~Medium-High~~ | ✅ **DONE** |
-| **P0** | Add timeouts to infinite loops | ∞ (fixes hangs) | Low | **BLOCKING - causes random freezes** |
-| **P0** | Add vsync before buffer flip | Fixes flicker | Low | New issue post-cache |
-| P1 | Sysmon memory stat caching | 10x for sysmon | Low | O(1) counters |
-| P1 | Dock hover dirty rect | 10x for hover | Medium | Only redraw changed icons |
-| P2 | FAT32 free cluster cache | 10x | Low | Track count, don't rescan |
-| P2 | Desktop dirty rectangles | 5x | Medium | Per-region tracking |
-| P3 | Memory allocator bins | 2-5x | High | Less critical now |
+| ~~P0~~ | ~~Infinite loop timeouts~~ | ~~∞~~ | ~~Low~~ | ✅ **DONE** |
+| ~~P0~~ | ~~Vsync before buffer flip~~ | ~~Fixes flicker~~ | ~~Low~~ | ✅ **DONE** |
+| ~~P1~~ | ~~Desktop dirty rectangles~~ | ~~5-10x~~ | ~~Medium~~ | ✅ **DONE** |
+| **P1** | Sysmon memory stat caching | 10x for sysmon | Low | O(1) counters needed |
+| **P1** | DMA fill (fix cache issues) | 10-50x | Medium | Works in desktop, cache issues in term/console |
+| **P1** | DMA for SD card | 4-8x | Medium | FIFO reads are slow |
+| **P2** | FAT32 free cluster cache | 10-100x | Low | Track count, don't rescan |
+| **P2** | VFS partial read | 100x | Medium | Don't load entire file |
+| **P2** | Scheduler ready queue | 16x | Medium | O(1) next process |
+| **P3** | Memory allocator bins | 2-5x | High | Less critical now |
 
 ---
 
 ## Conclusion
 
-### ✅ D-Cache Enabled - December 2024
+### ✅ Major Issues Fixed - December 2024
 
-System is now ~50-100x faster. So fast it causes display flicker (drawing faster than vsync).
+1. **D-Cache enabled** - System 50-100x faster
+2. **Infinite loop timeouts** - No more random hangs
+3. **Vsync added** - No more flicker
+4. **Desktop dirty tracking** - Efficient redraws
 
-### Remaining P0 Issues
+### Remaining Optimization Opportunities
 
-1. **Random hangs** - Add timeouts to mailbox_read/write, dma_wait (Finding #13)
-2. **Flicker** - Add vsync wait before buffer flip
+**High Impact (P1)**:
+- **Sysmon** - Add O(1) memory stat counters (Finding #11)
+- **DMA fill** - Implemented, works in desktop, cache issues in term/console (Finding #1)
+- **DMA for SD card** - Replace FIFO loops (Finding #2)
 
-### Nice-to-Have
+**Medium Impact (P2)**:
+- **FAT32 caching** - Track free cluster count (Finding #3)
+- **VFS partial reads** - Don't load entire file (Finding #4)
+- **Scheduler ready queue** - O(1) process selection (Finding #7)
 
-After fixing hangs and flicker, system should be usable. Other optimizations (dirty rects, FAT32 caching, allocator bins) are quality-of-life improvements, not blockers.
+**Lower Priority (P3)**:
+- **Memory allocator bins** - Segregated free lists (Finding #5)

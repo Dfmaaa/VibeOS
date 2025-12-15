@@ -43,3 +43,13 @@ int hal_dma_fb_copy(uint32_t *dst, const uint32_t *src, uint32_t width, uint32_t
     memcpy(dst, src, width * height * sizeof(uint32_t));
     return 0;
 }
+
+int hal_dma_fill(void *dst, uint32_t value, uint32_t len) {
+    // Fallback to CPU fill (len is in bytes, value is 32-bit)
+    uint32_t *d = (uint32_t *)dst;
+    uint32_t count = len / 4;
+    for (uint32_t i = 0; i < count; i++) {
+        d[i] = value;
+    }
+    return 0;
+}

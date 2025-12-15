@@ -369,4 +369,5 @@ void kapi_init(void) {
     kapi.dma_copy = hal_dma_copy;
     kapi.dma_copy_2d = hal_dma_copy_2d;
     kapi.dma_fb_copy = hal_dma_fb_copy;
+    kapi.dma_fill = hal_dma_fill;
 }

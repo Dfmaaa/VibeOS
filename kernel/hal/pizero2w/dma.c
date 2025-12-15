@@ -82,6 +82,9 @@ typedef struct __attribute__((aligned(32))) {
 // Static control block (must persist during transfer)
 static dma_cb_t __attribute__((aligned(32))) dma_cb;
 
+// Static fill value buffer (must persist during transfer, cache-line aligned)
+static uint32_t __attribute__((aligned(64))) fill_value_buf[16];
+
 // Flag to track if DMA is initialized
 static int dma_initialized = 0;
 
@@ -105,6 +108,19 @@ static void cache_clean_range(const void *start, uint32_t len) {
     while (addr < end) {
         // DC CVAC: Data Cache Clean by Virtual Address to Point of Coherency
         asm volatile("dc cvac, %0" : : "r"(addr) : "memory");
+        addr += CACHE_LINE_SIZE;
+    }
+    dsb();  // Ensure all cache operations complete before continuing
+}
+
+// Invalidate data cache for a memory range (so CPU sees DMA-written data)
+static void cache_invalidate_range(void *start, uint32_t len) {
+    uintptr_t addr = (uintptr_t)start & ~(CACHE_LINE_SIZE - 1);  // Align down
+    uintptr_t end = (uintptr_t)start + len;
+
+    while (addr < end) {
+        // DC IVAC: Data Cache Invalidate by Virtual Address to Point of Coherency
+        asm volatile("dc ivac, %0" : : "r"(addr) : "memory");
         addr += CACHE_LINE_SIZE;
     }
     dsb();  // Ensure all cache operations complete before continuing
@@ -280,6 +296,54 @@ int hal_dma_copy_2d(void *dst, uint32_t dst_pitch,
 int hal_dma_fb_copy(uint32_t *dst, const uint32_t *src, uint32_t width, uint32_t height) {
     // Use 1D copy for full framebuffer (simpler, same speed for contiguous data)
     return hal_dma_copy(dst, src, width * height * sizeof(uint32_t));
+}
+
+// Fill memory with a 32-bit value using DMA
+// Much faster than CPU memset for large regions (framebuffer clears, etc.)
+// len is in bytes and must be a multiple of 4
+int hal_dma_fill(void *dst, uint32_t value, uint32_t len) {
+    if (!dma_initialized) return -1;
+    if (len == 0) return 0;
+
+    // Fill the source buffer with the value
+    // DMA will read from this without incrementing, writing to consecutive dest addresses
+    for (int i = 0; i < 16; i++) {
+        fill_value_buf[i] = value;
+    }
+
+    // Clean cache so DMA sees our fill value
+    cache_clean_range(fill_value_buf, sizeof(fill_value_buf));
+
+    // Wait for any previous transfer
+    dma_wait(FB_DMA_CHANNEL);
+
+    // Set up control block:
+    // - SRC_INC=0: Don't increment source (read same value repeatedly)
+    // - DEST_INC=1: Increment destination
+    dma_cb.ti = DMA_TI_DEST_INC | DMA_TI_WAIT_RESP;  // Note: NO SRC_INC
+    dma_cb.source_ad = phys_to_bus(fill_value_buf);
+    dma_cb.dest_ad = phys_to_bus(dst);
+    dma_cb.txfr_len = len;
+    dma_cb.stride = 0;
+    dma_cb.nextconbk = 0;
+
+    // Clean cache for control block
+    cache_clean_range(&dma_cb, sizeof(dma_cb));
+
+    // Point DMA to control block
+    dma_write(FB_DMA_CHANNEL, DMA_CONBLK_AD, phys_to_bus(&dma_cb));
+    dmb();
+
+    // Start transfer
+    dma_write(FB_DMA_CHANNEL, DMA_CS, DMA_CS_ACTIVE | DMA_CS_PRIORITY(8) | DMA_CS_PANIC_PRI(15));
+
+    // Wait for completion
+    dma_wait(FB_DMA_CHANNEL);
+
+    // Invalidate CPU cache for destination so CPU sees DMA-written data
+    cache_invalidate_range(dst, len);
+
+    return 0;
 }
 
 // Check if DMA is available

@@ -1625,3 +1625,42 @@ Session 44: USB Keyboard Working on Real Pi Hardware!
 - `user/lib/vibe.h` - Added `led_status` to userspace kapi
 - `user/bin/led.c` - New LED control tool (replaced blink.c)
 - `Makefile` - Build led instead of blink
+
+## Session 53: DMA Fill Implementation & Optimization Audit Update
+
+**Goal**: Add DMA fill function for fast memory fills, update optimization audit.
+
+### DMA Fill (`kernel/hal/pizero2w/dma.c`)
+- Added `hal_dma_fill(dst, value, len)` - fills memory with 32-bit value using DMA
+- Technique: Source buffer with fill value, SRC_INC=0 (no increment), DEST_INC=1
+- Added `cache_invalidate_range()` for cache coherency after DMA writes
+- QEMU fallback uses CPU loop
+
+### Kernel API
+- Added `dma_fill` to kapi.h, kapi.c, vibe.h
+
+### Desktop Integration (`user/bin/desktop.c`)
+- Window creation: Uses DMA fill to clear new window buffer
+- Window resize: Uses DMA fill to clear resized buffer
+- Exit cleanup: Uses DMA fill to clear screen
+
+### Known Issue: DMA Fill Unreliable in Some Contexts
+- Works: Desktop window creation/resize/exit
+- Broken: term.c buffer clears (squiggly lines artifact)
+- Broken: console.c scroll clears (reverted to CPU)
+- Theory: SRC_INC=0 technique unreliable on BCM2837, or cache coherency timing issues
+- Decision: Keep DMA fill for desktop (works), use CPU loops in term.c
+
+### Optimization Audit Update (`docs/optimization_audit.md`)
+- Marked fixed: Infinite loops (timeouts added), vsync, desktop dirty tracking
+- Updated priority matrix and attack plan
+- DMA fill now exists but noted as partially working
+
+### Files Modified
+- `kernel/hal/pizero2w/dma.c` - Added hal_dma_fill, cache_invalidate_range
+- `kernel/hal/qemu/dma.c` - CPU fallback for dma_fill
+- `kernel/hal/hal.h` - dma_fill declaration
+- `kernel/kapi.h`, `kernel/kapi.c` - dma_fill API
+- `user/lib/vibe.h` - dma_fill in userspace kapi
+- `user/bin/desktop.c` - Use dma_fill for buffer clears
+- `docs/optimization_audit.md` - Updated status

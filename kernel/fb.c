@@ -48,7 +48,12 @@ int fb_init(void) {
     }
 
     // Clear entire buffer to black (including virtual scroll area)
-    memset32(fb_base, COLOR_BLACK, fb_width * fb_buffer_height);
+    // Use DMA if available for speed
+    if (hal_dma_available()) {
+        hal_dma_fill(fb_base, COLOR_BLACK, fb_width * fb_buffer_height * sizeof(uint32_t));
+    } else {
+        memset32(fb_base, COLOR_BLACK, fb_width * fb_buffer_height);
+    }
 
     return 0;
 }

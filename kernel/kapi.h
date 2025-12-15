@@ -209,6 +209,7 @@ typedef struct {
                        uint32_t width, uint32_t height);
     int (*dma_fb_copy)(uint32_t *dst, const uint32_t *src,      // Full framebuffer copy
                        uint32_t width, uint32_t height);
+    int (*dma_fill)(void *dst, uint32_t value, uint32_t len);   // Fill with 32-bit value
 
 } kapi_t;
 
