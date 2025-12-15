@@ -17,6 +17,9 @@ uint32_t fb_pitch = 0;
 uint32_t *fb_base = NULL;
 static uint32_t fb_buffer_height = 0;  // Actual buffer height (may be > fb_height for hw scroll)
 
+// Hardware double buffering state
+static int current_buffer = 0;  // 0 = top half visible, 1 = bottom half visible
+
 int fb_init(void) {
     // Note: Don't use printf here - console isn't initialized yet!
 
@@ -109,4 +112,33 @@ void fb_draw_string(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t
         }
         s++;
     }
+}
+
+// Hardware double buffering functions
+
+int fb_has_hw_double_buffer(void) {
+    // Hardware double buffering is available if virtual height is at least 2x physical
+    return (fb_buffer_height >= fb_height * 2);
+}
+
+int fb_flip(int buffer) {
+    if (!fb_has_hw_double_buffer()) return -1;
+    if (buffer < 0 || buffer > 1) return -1;
+
+    // Set the scroll offset to show the requested buffer
+    uint32_t y_offset = buffer ? fb_height : 0;
+    if (hal_fb_set_scroll_offset(y_offset) == 0) {
+        current_buffer = buffer;
+        return 0;
+    }
+    return -1;
+}
+
+uint32_t *fb_get_backbuffer(void) {
+    if (!fb_has_hw_double_buffer()) {
+        return fb_base;  // No hardware double buffering, use same buffer
+    }
+    // Return pointer to the non-visible buffer
+    // If buffer 0 is visible (top), return bottom; if buffer 1 is visible (bottom), return top
+    return fb_base + (current_buffer ? 0 : fb_width * fb_height);
 }

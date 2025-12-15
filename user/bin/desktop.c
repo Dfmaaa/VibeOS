@@ -80,6 +80,10 @@ static int window_order[MAX_WINDOWS];  // Z-order: window_order[0] is topmost
 static int window_count = 0;
 static int focused_window = -1;
 
+// Hardware double buffering state
+static int use_hw_double_buffer = 0;
+static int current_buffer = 0;
+
 // Mouse state
 static int mouse_x, mouse_y;
 static int mouse_prev_x, mouse_prev_y;
@@ -97,6 +101,19 @@ static int resize_start_mx, resize_start_my;
 
 // Desktop running flag
 static int running = 1;
+
+// Redraw control - skip frames when nothing changed
+static int needs_redraw = 1;        // Full redraw needed
+static int cursor_moved = 0;        // Just cursor position changed
+
+// Cursor background save (for cursor-only updates)
+static uint32_t cursor_save[16 * 16];
+static int cursor_save_x = -100, cursor_save_y = -100;
+static int cursor_save_valid = 0;
+
+// Dock hover state (to avoid redrawing dock when nothing changed)
+static int dock_hover_idx = -1;
+static int dock_hover_prev = -1;
 
 // Menu system
 #define MENU_NONE   -1
@@ -152,6 +169,11 @@ static void draw_dock(void);
 static void draw_menu_bar(void);
 static void flip_buffer(void);
 static void draw_about_dialog(void);
+
+// Request a full screen redraw
+static inline void request_redraw(void) {
+    needs_redraw = 1;
+}
 
 // About dialog state (declared here so draw_desktop can see it)
 static int show_about_dialog = 0;
@@ -222,6 +244,7 @@ static void bring_to_front(int wid) {
     }
     window_order[0] = wid;
     focused_window = wid;
+    request_redraw();
 }
 
 static int window_at_point(int x, int y) {
@@ -298,6 +321,7 @@ static int wm_window_create(int x, int y, int w, int h, const char *title) {
     window_order[0] = wid;
     window_count++;
     focused_window = wid;
+    request_redraw();
 
     return wid;
 }
@@ -331,6 +355,7 @@ static void wm_window_destroy(int wid) {
     if (focused_window == wid) {
         focused_window = (window_count > 0) ? window_order[0] : -1;
     }
+    request_redraw();
 }
 
 static uint32_t *wm_window_get_buffer(int wid, int *w, int *h) {
@@ -359,6 +384,7 @@ static int wm_window_poll_event(int wid, int *event_type, int *data1, int *data2
 static void wm_window_invalidate(int wid) {
     if (wid < 0 || wid >= MAX_WINDOWS || !windows[wid].active) return;
     windows[wid].dirty = 1;
+    request_redraw();
 }
 
 static void wm_window_set_title(int wid, const char *title) {
@@ -370,6 +396,7 @@ static void wm_window_set_title(int wid, const char *title) {
     }
     win->title[i] = '\0';
     win->dirty = 1;
+    request_redraw();
 }
 
 // ============ Dock ============
@@ -613,19 +640,13 @@ static void draw_open_menu(void) {
 
 // ============ Window Drawing ============
 
-// Draw System 7 style horizontal stripes for title bar
+// Draw System 7 style horizontal stripes for title bar (optimized)
 static void draw_title_stripes(int x, int y, int w, int h) {
     for (int row = 0; row < h; row++) {
         // Every other row is black (creates stripe effect)
-        if (row % 2 == 1) {
-            for (int col = 0; col < w; col++) {
-                bb_put_pixel(x + col, y + row, COLOR_BLACK);
-            }
-        } else {
-            for (int col = 0; col < w; col++) {
-                bb_put_pixel(x + col, y + row, COLOR_WHITE);
-            }
-        }
+        // Use fast horizontal line drawing instead of per-pixel
+        uint32_t color = (row & 1) ? COLOR_BLACK : COLOR_WHITE;
+        bb_draw_hline(x, y + row, w, color);
     }
 }
 
@@ -683,19 +704,26 @@ static void draw_window(int wid) {
     int title_y = w->y + 3;
     bb_draw_string(title_x, title_y, w->title, COLOR_BLACK, COLOR_WHITE);
 
-    // Content area - copy from window buffer
+    // Content area - copy from window buffer (row-wise for speed)
     int content_y = w->y + TITLE_BAR_HEIGHT + 2;
     int content_h = w->h - TITLE_BAR_HEIGHT - 4;
     int content_w = w->w - 4;
 
     for (int py = 0; py < content_h; py++) {
-        for (int px = 0; px < content_w; px++) {
-            int screen_x = w->x + 2 + px;
-            int screen_y = content_y + py;
-            if (screen_x < SCREEN_WIDTH && screen_y < SCREEN_HEIGHT) {
-                backbuffer[screen_y * SCREEN_WIDTH + screen_x] =
-                    w->buffer[py * (w->w) + px];
-            }
+        int screen_y = content_y + py;
+        if (screen_y >= SCREEN_HEIGHT) break;
+
+        int dst_offset = screen_y * SCREEN_WIDTH + w->x + 2;
+        int src_offset = py * w->w;
+
+        // Clip width to screen bounds
+        int copy_w = content_w;
+        if (w->x + 2 + copy_w > SCREEN_WIDTH) {
+            copy_w = SCREEN_WIDTH - (w->x + 2);
+        }
+        if (copy_w > 0) {
+            // Use 64-bit copy for entire row
+            memcpy64(&backbuffer[dst_offset], &w->buffer[src_offset], copy_w * sizeof(uint32_t));
         }
     }
 
@@ -713,6 +741,101 @@ static void draw_window(int wid) {
 }
 
 // ============ Cursor ============
+
+// Save the background under cursor position from a buffer
+static void save_cursor_bg(uint32_t *buffer, int x, int y) {
+    for (int py = 0; py < 16; py++) {
+        for (int px = 0; px < 16; px++) {
+            int sx = x + px, sy = y + py;
+            if (sx >= 0 && sx < SCREEN_WIDTH && sy >= 0 && sy < SCREEN_HEIGHT) {
+                cursor_save[py * 16 + px] = buffer[sy * SCREEN_WIDTH + sx];
+            } else {
+                cursor_save[py * 16 + px] = COLOR_BLACK;
+            }
+        }
+    }
+    cursor_save_x = x;
+    cursor_save_y = y;
+    cursor_save_valid = 1;
+}
+
+// Restore cursor background to a buffer
+static void restore_cursor_bg(uint32_t *buffer) {
+    if (!cursor_save_valid) return;
+    for (int py = 0; py < 16; py++) {
+        for (int px = 0; px < 16; px++) {
+            int sx = cursor_save_x + px, sy = cursor_save_y + py;
+            if (sx >= 0 && sx < SCREEN_WIDTH && sy >= 0 && sy < SCREEN_HEIGHT) {
+                buffer[sy * SCREEN_WIDTH + sx] = cursor_save[py * 16 + px];
+            }
+        }
+    }
+}
+
+// Draw cursor to a specific buffer
+static void draw_cursor_to_buffer(uint32_t *buffer, int x, int y) {
+    // Classic Mac-style arrow cursor
+    static const uint8_t cursor_bits[16 * 16] = {
+        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        1,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        1,2,2,1,0,0,0,0,0,0,0,0,0,0,0,0,
+        1,2,2,2,1,0,0,0,0,0,0,0,0,0,0,0,
+        1,2,2,2,2,1,0,0,0,0,0,0,0,0,0,0,
+        1,2,2,2,2,2,1,0,0,0,0,0,0,0,0,0,
+        1,2,2,2,2,2,2,1,0,0,0,0,0,0,0,0,
+        1,2,2,2,2,2,2,2,1,0,0,0,0,0,0,0,
+        1,2,2,2,2,2,2,2,2,1,0,0,0,0,0,0,
+        1,2,2,2,2,2,1,1,1,1,1,0,0,0,0,0,
+        1,2,2,1,2,2,1,0,0,0,0,0,0,0,0,0,
+        1,2,1,1,2,2,1,0,0,0,0,0,0,0,0,0,
+        1,1,0,0,1,2,2,1,0,0,0,0,0,0,0,0,
+        1,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,
+    };
+
+    for (int py = 0; py < 16; py++) {
+        for (int px = 0; px < 16; px++) {
+            uint8_t c = cursor_bits[py * 16 + px];
+            if (c != 0) {
+                int sx = x + px;
+                int sy = y + py;
+                if (sx >= 0 && sx < SCREEN_WIDTH && sy >= 0 && sy < SCREEN_HEIGHT) {
+                    uint32_t color = (c == 1) ? COLOR_BLACK : COLOR_WHITE;
+                    buffer[sy * SCREEN_WIDTH + sx] = color;
+                }
+            }
+        }
+    }
+}
+
+// Get pointer to the currently visible buffer
+static uint32_t *get_visible_buffer(void) {
+    if (use_hw_double_buffer) {
+        // After flip_buffer(), current_buffer was toggled and now points to the BACKBUFFER
+        // So the VISIBLE buffer is the opposite of current_buffer
+        // If current_buffer == 0, visible = buffer 1 (bottom half)
+        // If current_buffer == 1, visible = buffer 0 (top half)
+        return api->fb_base + (current_buffer ? 0 : SCREEN_WIDTH * SCREEN_HEIGHT);
+    } else {
+        return api->fb_base;
+    }
+}
+
+// Update cursor position on the visible buffer (for cursor-only updates)
+static void update_cursor_only(int old_x, int old_y, int new_x, int new_y) {
+    uint32_t *visible = get_visible_buffer();
+    (void)old_x; (void)old_y;  // We use cursor_save_x/y instead
+
+    // Restore old cursor background
+    restore_cursor_bg(visible);
+
+    // Save new cursor background
+    save_cursor_bg(visible, new_x, new_y);
+
+    // Draw cursor at new position
+    draw_cursor_to_buffer(visible, new_x, new_y);
+}
 
 static void draw_cursor(int x, int y) {
     // Classic Mac-style arrow cursor as flat array (PIE-safe)
@@ -781,7 +904,19 @@ static void draw_desktop(void) {
 }
 
 static void flip_buffer(void) {
-    memcpy(api->fb_base, backbuffer, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
+    if (use_hw_double_buffer) {
+        // Hardware flip - instant, zero-copy!
+        // We've been drawing to the backbuffer (non-visible half)
+        // Now make it visible by switching scroll offset
+        api->fb_flip(current_buffer);
+        current_buffer = !current_buffer;
+        // Update backbuffer pointer to the now-hidden buffer
+        backbuffer = api->fb_get_backbuffer();
+        gfx.buffer = backbuffer;
+    } else {
+        // Software copy (QEMU fallback) - use fast 64-bit copy
+        memcpy64(api->fb_base, backbuffer, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
+    }
 }
 
 // ============ Input Handling ============
@@ -930,6 +1065,7 @@ static void do_menu_action(int action) {
     switch (action) {
         case ACTION_ABOUT:
             show_about_dialog = 1;
+            request_redraw();
             break;
         case ACTION_QUIT:
             running = 0;
@@ -997,6 +1133,7 @@ static void handle_mouse_click(int x, int y, uint8_t buttons) {
         if (x >= btn_x && x < btn_x + btn_w &&
             y >= btn_y && y < btn_y + btn_h) {
             show_about_dialog = 0;
+            request_redraw();
         }
         // Click anywhere in dialog dismisses it too
         if (x >= ABOUT_X && x < ABOUT_X + ABOUT_W &&
@@ -1005,6 +1142,7 @@ static void handle_mouse_click(int x, int y, uint8_t buttons) {
         } else {
             // Clicked outside dialog - dismiss it
             show_about_dialog = 0;
+            request_redraw();
         }
         return;  // Modal - don't process other clicks
     }
@@ -1021,6 +1159,7 @@ static void handle_mouse_click(int x, int y, uint8_t buttons) {
         } else {
             open_menu = MENU_NONE;
         }
+        request_redraw();
         return;
     }
 
@@ -1042,6 +1181,7 @@ static void handle_mouse_click(int x, int y, uint8_t buttons) {
 
         // Close menu after any click outside menu bar
         open_menu = MENU_NONE;
+        request_redraw();
         return;
     }
 
@@ -1054,6 +1194,7 @@ static void handle_mouse_click(int x, int y, uint8_t buttons) {
                 // Fullscreen app - exec and wait
                 api->exec(icon->exec_path);
                 // When we return, redraw everything
+                request_redraw();
             } else {
                 // Windowed app - spawn
                 api->spawn(icon->exec_path);
@@ -1129,6 +1270,7 @@ static void handle_mouse_release(int x, int y) {
         push_event(resizing_window, WIN_EVENT_RESIZE, w->w, w->h, 0);
 
         resizing_window = -1;
+        request_redraw();
         return;
     }
 
@@ -1155,6 +1297,7 @@ static void handle_mouse_move(int x, int y) {
         if (w->x + w->w > SCREEN_WIDTH) w->x = SCREEN_WIDTH - w->w;
         if (w->y + w->h > SCREEN_HEIGHT - DOCK_HEIGHT)
             w->y = SCREEN_HEIGHT - DOCK_HEIGHT - w->h;
+        request_redraw();
         return;  // Don't send move events while dragging
     }
 
@@ -1176,6 +1319,7 @@ static void handle_mouse_move(int x, int y) {
 
         w->w = new_w;
         w->h = new_h;
+        request_redraw();
         return;  // Don't send move events while resizing
     }
 
@@ -1234,11 +1378,28 @@ int main(kapi_t *kapi, int argc, char **argv) {
     SCREEN_WIDTH = api->fb_width;
     SCREEN_HEIGHT = api->fb_height;
 
-    // Allocate backbuffer
-    backbuffer = api->malloc(SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
-    if (!backbuffer) {
-        api->puts("Desktop: failed to allocate backbuffer\n");
-        return 1;
+    // Check for hardware double buffering (Pi only)
+    if (api->fb_has_hw_double_buffer && api->fb_has_hw_double_buffer()) {
+        use_hw_double_buffer = 1;
+        // Use the kernel-provided backbuffer (part of the 2x height framebuffer)
+        backbuffer = api->fb_get_backbuffer();
+        // Determine which buffer we're drawing to based on backbuffer address
+        // If backbuffer is the bottom half, we'll flip to show buffer 1
+        // If backbuffer is the top half, we'll flip to show buffer 0
+        if (backbuffer == api->fb_base) {
+            current_buffer = 0;  // Drawing to top, will show top
+        } else {
+            current_buffer = 1;  // Drawing to bottom, will show bottom
+        }
+        api->puts("Desktop: using hardware double buffering\n");
+    } else {
+        use_hw_double_buffer = 0;
+        // Allocate our own backbuffer
+        backbuffer = api->malloc(SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
+        if (!backbuffer) {
+            api->puts("Desktop: failed to allocate backbuffer\n");
+            return 1;
+        }
     }
 
     // Initialize graphics context
@@ -1260,6 +1421,14 @@ int main(kapi_t *kapi, int argc, char **argv) {
         api->mouse_get_pos(&mouse_x, &mouse_y);
         mouse_buttons = api->mouse_get_buttons();
 
+        // Track if cursor moved (for cursor-only updates)
+        cursor_moved = (mouse_x != mouse_prev_x || mouse_y != mouse_prev_y);
+
+        // Track dock hover state
+        dock_hover_prev = dock_hover_idx;
+        dock_hover_idx = dock_icon_at_point(mouse_x, mouse_y);
+        int dock_hover_changed = (dock_hover_idx != dock_hover_prev);
+
         // Handle mouse events
         int left_pressed = (mouse_buttons & MOUSE_BTN_LEFT) && !(mouse_prev_buttons & MOUSE_BTN_LEFT);
         int left_released = !(mouse_buttons & MOUSE_BTN_LEFT) && (mouse_prev_buttons & MOUSE_BTN_LEFT);
@@ -1274,17 +1443,42 @@ int main(kapi_t *kapi, int argc, char **argv) {
         if (left_released) {
             handle_mouse_release(mouse_x, mouse_y);
         }
-        if (mouse_x != mouse_prev_x || mouse_y != mouse_prev_y) {
+        if (cursor_moved) {
             handle_mouse_move(mouse_x, mouse_y);
         }
 
         // Handle keyboard
         handle_keyboard();
 
-        // Always redraw (simple approach - can optimize later)
-        draw_desktop();
-        draw_cursor(mouse_x, mouse_y);
-        flip_buffer();
+        // Dock hover change requires full redraw (icon highlight changes)
+        if (dock_hover_changed) {
+            needs_redraw = 1;
+        }
+
+        // Menu open requires full redraw on cursor move (hover highlighting)
+        if (open_menu != MENU_NONE && cursor_moved) {
+            needs_redraw = 1;
+        }
+
+        // About dialog hover requires full redraw (button highlighting)
+        if (show_about_dialog && cursor_moved) {
+            needs_redraw = 1;
+        }
+
+        // Decide what to redraw
+        if (needs_redraw) {
+            // Full redraw needed
+            draw_desktop();
+            // Save cursor background BEFORE drawing cursor (so we save the clean background)
+            save_cursor_bg(backbuffer, mouse_x, mouse_y);
+            draw_cursor(mouse_x, mouse_y);
+            flip_buffer();
+            needs_redraw = 0;
+        } else if (cursor_moved) {
+            // Only cursor moved - update cursor directly on visible buffer
+            // This is MUCH faster than a full redraw
+            update_cursor_only(mouse_prev_x, mouse_prev_y, mouse_x, mouse_y);
+        }
 
         mouse_prev_x = mouse_x;
         mouse_prev_y = mouse_y;
@@ -1299,11 +1493,19 @@ int main(kapi_t *kapi, int argc, char **argv) {
         api->fb_base[i] = COLOR_BLACK;
     }
 
+    // Reset scroll offset if using hardware double buffering
+    if (use_hw_double_buffer) {
+        api->fb_flip(0);  // Show top buffer
+    }
+
     // Clear console and show exit message
     api->clear();
     api->puts("Desktop exited.\n");
 
-    api->free(backbuffer);
+    // Only free if we allocated it ourselves
+    if (!use_hw_double_buffer) {
+        api->free(backbuffer);
+    }
 
     return 0;
 }

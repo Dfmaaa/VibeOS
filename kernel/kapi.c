@@ -357,4 +357,9 @@ void kapi_init(void) {
     // Kernel log (dmesg)
     kapi.klog_read = klog_read;
     kapi.klog_size = klog_size;
+
+    // Hardware double buffering
+    kapi.fb_has_hw_double_buffer = fb_has_hw_double_buffer;
+    kapi.fb_flip = fb_flip;
+    kapi.fb_get_backbuffer = fb_get_backbuffer;
 }

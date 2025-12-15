@@ -195,6 +195,11 @@ typedef struct {
     size_t (*klog_read)(char *buf, size_t offset, size_t size);  // Read from kernel log
     size_t (*klog_size)(void);                                   // Get log size
 
+    // Hardware double buffering (Pi only)
+    int (*fb_has_hw_double_buffer)(void);    // Returns 1 if hardware double buffering available
+    int (*fb_flip)(int buffer);              // Switch visible buffer (0 or 1), returns 0 on success
+    uint32_t *(*fb_get_backbuffer)(void);    // Get pointer to current backbuffer
+
 } kapi_t;
 
 // TTF font style flags (for ttf_get_glyph)

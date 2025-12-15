@@ -1462,3 +1462,52 @@ Session 44: USB Keyboard Working on Real Pi Hardware!
   - `kernel/hal/qemu/platform.c` - HAL mouse stubs
   - `Makefile` - added mousetest to USER_PROGS
 - **Achievement**: Full mouse support on Raspberry Pi! Desktop GUI now possible on real hardware!
+
+---
+
+## Session 41 - Desktop Performance Optimization
+
+- **MASSIVE DESKTOP PERFORMANCE IMPROVEMENTS FOR PI**
+- **Problem:** Desktop was unusably slow on Pi - redrawing entire 800x600 screen every frame with pixel-by-pixel loops
+- **Root Causes Found:**
+  1. Full redraw every frame (even when nothing changed)
+  2. Pixel-by-pixel nested loops everywhere
+  3. 480KB memcpy every flip (even when nothing changed)
+  4. Pi has hardware scroll but it was unused
+
+### Phase 1: Skip Static Frames
+- Added `needs_redraw` flag - desktop only redraws when something actually changed
+- Added `request_redraw()` helper called by window management, menus, etc.
+- No work when idle
+
+### Phase 2: 64-bit Graphics Primitives (`user/lib/vibe.h`, `user/lib/gfx.h`)
+- Added `memset32_fast()` - fills 2 pixels per 64-bit store
+- Added `memcpy64()` - copies 8 bytes per operation
+- Optimized `gfx_fill_rect()`, `gfx_draw_hline()`, `gfx_fill_pattern()`
+- Optimized window content copy (row-based memcpy64 instead of pixel loop)
+- Optimized title bar stripes drawing
+
+### Phase 3: Hardware Double Buffering (Pi Only)
+- Added kernel API: `fb_has_hw_double_buffer()`, `fb_flip()`, `fb_get_backbuffer()`
+- Pi's 2x virtual framebuffer now used for zero-copy flipping
+- `flip_buffer()` on Pi just changes GPU scroll offset (instant)
+- QEMU falls back to fast 64-bit memcpy
+
+### Phase 4: Smarter Redraw
+- Tracks dock hover state - only redraws when highlighted icon changes
+- Menu/dialog hover triggers redraws only when open
+- Avoids full redraw for hover changes outside interactive areas
+
+### Phase 5: Cursor-Only Updates
+- When ONLY cursor moved (no other changes):
+  - Saves/restores 16x16 cursor background
+  - Updates cursor directly on visible buffer
+  - Skips full redraw (~512 pixels vs ~480,000)
+- `get_visible_buffer()` handles hardware double buffer correctly
+
+### Files Modified:
+- `user/bin/desktop.c` - needs_redraw, cursor-only updates, hw double buffer support
+- `user/lib/gfx.h` - optimized drawing primitives with 64-bit ops
+- `user/lib/vibe.h` - added memset32_fast, memcpy64, new kapi fields
+- `kernel/fb.c` / `kernel/fb.h` - hardware double buffer functions
+- `kernel/kapi.c` / `kernel/kapi.h` - new fb_flip API

@@ -35,26 +35,29 @@ static inline void gfx_put_pixel(gfx_ctx_t *ctx, int x, int y, uint32_t color) {
     }
 }
 
-// Fill a rectangle with solid color
+// Fill a rectangle with solid color (optimized with 64-bit stores)
 static inline void gfx_fill_rect(gfx_ctx_t *ctx, int x, int y, int w, int h, uint32_t color) {
-    for (int py = y; py < y + h && py < ctx->height; py++) {
-        if (py < 0) continue;
-        for (int px = x; px < x + w && px < ctx->width; px++) {
-            if (px < 0) continue;
-            ctx->buffer[py * ctx->width + px] = color;
-        }
+    // Clip to bounds
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > ctx->width) w = ctx->width - x;
+    if (y + h > ctx->height) h = ctx->height - y;
+    if (w <= 0 || h <= 0) return;
+
+    // Fill row by row using fast 64-bit memset
+    for (int py = y; py < y + h; py++) {
+        memset32_fast(&ctx->buffer[py * ctx->width + x], color, w);
     }
 }
 
-// Draw a horizontal line
+// Draw a horizontal line (optimized with 64-bit stores)
 static inline void gfx_draw_hline(gfx_ctx_t *ctx, int x, int y, int w, uint32_t color) {
     if (y < 0 || y >= ctx->height) return;
-    for (int i = 0; i < w; i++) {
-        int px = x + i;
-        if (px >= 0 && px < ctx->width) {
-            ctx->buffer[y * ctx->width + px] = color;
-        }
-    }
+    // Clip to bounds
+    if (x < 0) { w += x; x = 0; }
+    if (x + w > ctx->width) w = ctx->width - x;
+    if (w <= 0) return;
+    memset32_fast(&ctx->buffer[y * ctx->width + x], color, w);
 }
 
 // Draw a vertical line
@@ -199,14 +202,41 @@ static inline int gfx_draw_ttf_string(gfx_ctx_t *ctx, kapi_t *k, int x, int y,
 
 // ============ Patterns (for desktop background, etc.) ============
 
-// Classic Mac diagonal checkerboard pattern
+// Classic Mac diagonal checkerboard pattern (optimized with 64-bit stores)
 static inline void gfx_fill_pattern(gfx_ctx_t *ctx, int x, int y, int w, int h, uint32_t c1, uint32_t c2) {
-    for (int py = y; py < y + h && py < ctx->height; py++) {
-        if (py < 0) continue;
-        for (int px = x; px < x + w && px < ctx->width; px++) {
-            if (px < 0) continue;
-            int pattern = ((px + py) % 2 == 0) ? 1 : 0;
-            ctx->buffer[py * ctx->width + px] = pattern ? c1 : c2;
+    // Clip to bounds
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > ctx->width) w = ctx->width - x;
+    if (y + h > ctx->height) h = ctx->height - y;
+    if (w <= 0 || h <= 0) return;
+
+    // Precompute 64-bit patterns for two pixels at a time
+    // Pattern alternates c1,c2 or c2,c1 depending on row parity
+    uint64_t pattern_even = ((uint64_t)c2 << 32) | c1;  // c1 at even x, c2 at odd x
+    uint64_t pattern_odd = ((uint64_t)c1 << 32) | c2;   // c2 at even x, c1 at odd x
+
+    for (int py = y; py < y + h; py++) {
+        uint32_t *row = &ctx->buffer[py * ctx->width + x];
+        int row_parity = (py + x) & 1;  // Determines starting color
+
+        // Use 64-bit stores for pairs of pixels
+        if ((x & 1) == 0 && w >= 2) {
+            uint64_t *row64 = (uint64_t *)row;
+            uint64_t p = row_parity ? pattern_odd : pattern_even;
+            int pairs = w / 2;
+            for (int i = 0; i < pairs; i++) {
+                row64[i] = p;
+            }
+            // Handle odd pixel at end
+            if (w & 1) {
+                row[w - 1] = ((py + x + w - 1) & 1) ? c2 : c1;
+            }
+        } else {
+            // Fallback for unaligned start
+            for (int px = 0; px < w; px++) {
+                row[px] = ((px + x + py) & 1) ? c2 : c1;
+            }
         }
     }
 }

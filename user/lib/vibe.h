@@ -191,6 +191,11 @@ typedef struct kapi {
     // Kernel log (dmesg)
     size_t (*klog_read)(char *buf, size_t offset, size_t size);  // Read from kernel log
     size_t (*klog_size)(void);                                   // Get log size
+
+    // Hardware double buffering (Pi only)
+    int (*fb_has_hw_double_buffer)(void);    // Returns 1 if hardware double buffering available
+    int (*fb_flip)(int buffer);              // Switch visible buffer (0 or 1), returns 0 on success
+    uint32_t *(*fb_get_backbuffer)(void);    // Get pointer to current backbuffer
 } kapi_t;
 
 // TTF glyph info (returned by ttf_get_glyph)
@@ -319,6 +324,55 @@ static inline void *memcpy(void *dst, const void *src, size_t n) {
     const unsigned char *s = (const unsigned char *)src;
     while (n--) *d++ = *s++;
     return dst;
+}
+
+// Fast 64-bit aligned memset for 32-bit values (fills 2 pixels at a time)
+static inline void memset32_fast(uint32_t *dst, uint32_t val, size_t count) {
+    // Use 64-bit stores when aligned and count is sufficient
+    if (((size_t)dst & 7) == 0 && count >= 2) {
+        uint64_t pattern = ((uint64_t)val << 32) | val;
+        uint64_t *d64 = (uint64_t *)dst;
+        size_t n64 = count / 2;
+        for (size_t i = 0; i < n64; i++) {
+            d64[i] = pattern;
+        }
+        // Handle odd pixel at end
+        if (count & 1) {
+            dst[count - 1] = val;
+        }
+    } else {
+        // Fallback for unaligned or small counts
+        for (size_t i = 0; i < count; i++) {
+            dst[i] = val;
+        }
+    }
+}
+
+// Fast 64-bit aligned memcpy (copies 8 bytes at a time)
+static inline void memcpy64(void *dst, const void *src, size_t n) {
+    // Use 64-bit loads/stores when both aligned
+    if (((size_t)dst & 7) == 0 && ((size_t)src & 7) == 0 && n >= 8) {
+        uint64_t *d = (uint64_t *)dst;
+        const uint64_t *s = (const uint64_t *)src;
+        size_t n64 = n / 8;
+        for (size_t i = 0; i < n64; i++) {
+            d[i] = s[i];
+        }
+        // Handle remainder bytes
+        size_t rem = n & 7;
+        if (rem) {
+            uint8_t *d8 = (uint8_t *)(d + n64);
+            const uint8_t *s8 = (const uint8_t *)(s + n64);
+            for (size_t i = 0; i < rem; i++) {
+                d8[i] = s8[i];
+            }
+        }
+    } else {
+        // Fallback for unaligned
+        uint8_t *d = (uint8_t *)dst;
+        const uint8_t *s = (const uint8_t *)src;
+        while (n--) *d++ = *s++;
+    }
 }
 
 // Check if character is whitespace
