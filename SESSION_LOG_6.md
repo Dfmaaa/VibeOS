@@ -109,9 +109,65 @@ Trimmed from ~50MB to ~3.5MB:
 - Arbitrary precision integers (`2 ** 100`)
 
 ### What Doesn't Work Yet
-- Running .py files from disk (needs `mp_lexer_new_from_file()`)
-- Floats (disabled to avoid libgcc)
-- External modules (json, re, random)
+- **Running .py files from disk** - Needs `mp_lexer_new_from_file()` implemented in main.c
+  - Currently only REPL mode works
+  - Need to either:
+    1. Implement file lexer using kapi file I/O functions
+    2. Add `vibe.read_file()` helper and use `exec(vibe.read_file("/python/hello.py"))`
+- **Floats** - Disabled to avoid libgcc soft-float dependencies
+- **External modules** - json, re, random disabled (could be enabled if needed)
+
+### Missing kapi Bindings in vibe Module
+The vibe module only exposes a small subset of kapi. Missing bindings:
+
+**File I/O** (HIGH PRIORITY for running .py files):
+- `open()`, `read()`, `write()`, `create()`, `mkdir()`, `delete()`, `rename()`
+- `readdir()`, `is_dir()`, `file_size()`
+- `set_cwd()`, `get_cwd()`
+
+**Console Extended**:
+- `putc()`, `uart_puts()`, `set_cursor()`, `set_cursor_enabled()`
+- `print_int()`, `print_hex()`, `clear_to_eol()`, `clear_region()`
+- `console_rows()`, `console_cols()`
+
+**Memory Allocation**:
+- `malloc()`, `free()` - Could expose for large buffers
+
+**Process Management**:
+- `exit()`, `exec()`, `spawn()`, `kill_process()`
+- `get_process_count()`, `get_process_info()`
+
+**Time & RTC**:
+- `get_timestamp()`, `get_datetime()` - For date/time scripts
+
+**Sound**:
+- `sound_play_wav()`, `sound_play_pcm()`, `sound_stop()`, `sound_pause()`, `sound_resume()`
+
+**Networking** (for HTTP/fetch scripts):
+- `net_ping()`, `net_get_ip()`, `dns_resolve()`
+- `tcp_connect()`, `tcp_send()`, `tcp_recv()`, `tcp_close()`
+- `tls_connect()`, `tls_send()`, `tls_recv()`, `tls_close()`
+
+**System Info**:
+- `get_ram_total()`, `get_disk_total()`, `get_disk_free()`
+- `get_cpu_name()`, `get_cpu_freq_mhz()`, `get_cpu_cores()`
+- `usb_device_count()`, `usb_device_info()`
+- `klog_read()`, `klog_size()` - For dmesg viewer
+
+**Hardware** (Pi-specific):
+- `led_on()`, `led_off()`, `led_toggle()`, `led_status()`
+- `fb_has_hw_double_buffer()`, `fb_flip()`, `fb_get_backbuffer()`
+- `dma_available()`, `dma_copy()`, `dma_fill()`
+
+**Advanced Graphics**:
+- `ttf_get_glyph()`, `ttf_get_advance()`, `ttf_get_kerning()` - TrueType fonts
+- `font_data` - Direct font access
+- `fb_base` - Direct framebuffer access
+- `window_*` functions - For desktop apps
+
+**Not Needed**:
+- `stdio_*` hooks - Internal to terminal emulator
+- Debug memory functions - For debugging only
 
 ### Files Created
 - `micropython/ports/vibeos/*` - Port implementation
@@ -134,3 +190,32 @@ Trimmed from ~50MB to ~3.5MB:
 3. VT100 escape codes assumed by readline - need stubs if terminal doesn't support them
 4. Key codes differ: VibeOS uses `'\n'` for Enter, readline expects `'\r'`
 5. Trimming MicroPython source is safe - just keep py/, shared/, and your port
+
+### Future Work
+Priority order for expanding Python capabilities:
+
+1. **File execution** - Implement `mp_lexer_new_from_file()` so you can run `/python/hello.py`
+   - Add file I/O bindings to vibe module first
+   - Or add simple `vibe.read_file()` helper
+
+2. **Enable modules** - Turn on json, re if needed
+   - Would need to verify no problematic dependencies
+   - Might increase binary size significantly
+
+3. **Add networking bindings** - tcp/dns for HTTP scripts
+   - Could write a simple HTTP client in Python
+   - Fetch and parse web data
+
+4. **Add sound bindings** - Play WAV/PCM from Python
+   - Music player scripts
+   - Sound effects for games
+
+5. **Floats** - If needed for calculations
+   - Requires libgcc soft-float library
+   - Would increase binary size
+
+6. **Process control** - spawn(), exec() for launching programs from Python
+   - Python as a shell scripting language
+
+7. **TrueType fonts** - Render text with TTF from Python
+   - GUI applications with nice fonts
