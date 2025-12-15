@@ -54,14 +54,9 @@ static inline void sdhci_write(uint32_t reg, uint32_t val) {
     *(volatile uint32_t *)(SDHCI_BASE + reg) = val;
 }
 
-/* GPIO register access */
-static inline uint32_t gpio_read(uint32_t reg) {
-    return *(volatile uint32_t *)(GPIO_BASE + reg);
-}
-
-static inline void gpio_write(uint32_t reg, uint32_t val) {
-    *(volatile uint32_t *)(GPIO_BASE + reg) = val;
-}
+/* GPIO API from gpio.c */
+extern void gpio_set_function(int pin, int func);
+extern void gpio_set_pull_mask(uint32_t pins_mask, int bank, int pull);
 
 /* Mailbox register access */
 static inline uint32_t mbox_read_reg(uint32_t reg) {
@@ -223,38 +218,16 @@ static uint32_t query_emmc_clock(void) {
  *   GPIO 48 = CLK
  *   GPIO 49 = CMD
  *   GPIO 50-53 = DAT0-DAT3
- * All need to be set to ALT3 function
+ * All need to be set to ALT3 function with pull-ups
  */
 static void setup_sd_gpio(void) {
-    /* GPFSEL4 (0x10) controls GPIO 40-49 */
-    /* GPFSEL5 (0x14) controls GPIO 50-59 */
+    // Set all SD card pins to ALT3 function
+    for (int pin = 48; pin <= 53; pin++) {
+        gpio_set_function(pin, GPIO_ALT3);
+    }
 
-    /* GPIO 48: bits 24-26 of GPFSEL4, ALT3 = 0b111 */
-    /* GPIO 49: bits 27-29 of GPFSEL4, ALT3 = 0b111 */
-    uint32_t fsel4 = gpio_read(0x10);
-    fsel4 &= ~((7 << 24) | (7 << 27));
-    fsel4 |= (7 << 24) | (7 << 27);
-    gpio_write(0x10, fsel4);
-
-    /* GPIO 50-53: bits 0-11 of GPFSEL5, ALT3 = 0b111 each */
-    uint32_t fsel5 = gpio_read(0x14);
-    fsel5 &= ~((7 << 0) | (7 << 3) | (7 << 6) | (7 << 9));
-    fsel5 |= (7 << 0) | (7 << 3) | (7 << 6) | (7 << 9);
-    gpio_write(0x14, fsel5);
-
-    /* Enable pull-ups on all SD pins */
-    /* GPPUD (0x94) = pull-up/down control */
-    /* GPPUDCLK1 (0x9C) = clock for GPIO 32-53 */
-    gpio_write(0x94, 2);  /* 2 = pull-up */
-    delay_us(150);
-
-    /* Clock the pull-up setting into GPIO 48-53 */
-    /* Bits 16-21 in GPPUDCLK1 correspond to GPIO 48-53 */
-    gpio_write(0x9C, 0x3F0000);  /* bits 16-21 */
-    delay_us(150);
-
-    gpio_write(0x94, 0);
-    gpio_write(0x9C, 0);
+    // Enable pull-ups on GPIO 48-53 (bits 16-21 in bank 1)
+    gpio_set_pull_mask(0x3F0000, 1, GPIO_PULL_UP);
 }
 
 /* SDHCI interrupt bits */

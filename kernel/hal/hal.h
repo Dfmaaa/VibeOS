@@ -117,6 +117,46 @@ void hal_led_init(void);
 void hal_led_on(void);
 void hal_led_off(void);
 void hal_led_toggle(void);
+int hal_led_status(void);
+
+/*
+ * GPIO (General Purpose I/O)
+ * Direct GPIO pin control (Pi only, QEMU stubs return 0/-1)
+ *
+ * Function values:
+ *   GPIO_INPUT  = 0
+ *   GPIO_OUTPUT = 1
+ *   GPIO_ALT0   = 4 (I2C, SPI, etc.)
+ *   GPIO_ALT1   = 5
+ *   GPIO_ALT2   = 6
+ *   GPIO_ALT3   = 7 (SD card)
+ *   GPIO_ALT4   = 3
+ *   GPIO_ALT5   = 2 (UART)
+ *
+ * Pull values:
+ *   GPIO_PULL_NONE = 0
+ *   GPIO_PULL_DOWN = 1
+ *   GPIO_PULL_UP   = 2
+ */
+#define GPIO_INPUT      0
+#define GPIO_OUTPUT     1
+#define GPIO_ALT0       4
+#define GPIO_ALT1       5
+#define GPIO_ALT2       6
+#define GPIO_ALT3       7
+#define GPIO_ALT4       3
+#define GPIO_ALT5       2
+
+#define GPIO_PULL_NONE  0
+#define GPIO_PULL_DOWN  1
+#define GPIO_PULL_UP    2
+
+void gpio_set_function(int pin, int func);
+int gpio_get_function(int pin);
+void gpio_set(int pin, int high);
+int gpio_get(int pin);
+void gpio_set_pull(int pin, int pull);
+void gpio_set_pull_mask(uint32_t pins_mask, int bank, int pull);
 
 /*
  * CPU Info

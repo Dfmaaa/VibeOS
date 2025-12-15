@@ -247,7 +247,10 @@ static void on_timer_tick(void) {
     asm volatile("mrs %0, cntfrq_el0" : "=r"(freq));
     asm volatile("msr cntp_tval_el0, %0" :: "r"((freq * tick_period_ms) / 1000));
 
-    led_toggle();
+    // Heartbeat LED - toggle every 50ms (5 ticks) = 10Hz
+    if ((tick_count % 5) == 0) {
+        led_toggle();
+    }
 
     // Poll USB keyboard every tick (10ms)
     // This is much more efficient than SOF-based polling (1000 IRQs/sec)

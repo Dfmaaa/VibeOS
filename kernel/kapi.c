@@ -341,6 +341,7 @@ void kapi_init(void) {
     kapi.led_on = hal_led_on;
     kapi.led_off = hal_led_off;
     kapi.led_toggle = hal_led_toggle;
+    kapi.led_status = hal_led_status;
 
     // Process control
     kapi.kill_process = process_kill;

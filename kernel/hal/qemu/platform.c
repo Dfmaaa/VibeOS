@@ -54,6 +54,42 @@ void hal_led_toggle(void) {
     // No LED on QEMU virt
 }
 
+int hal_led_status(void) {
+    return 0;  // No LED on QEMU
+}
+
+// GPIO stubs - QEMU virt has no GPIO
+void gpio_set_function(int pin, int func) {
+    (void)pin;
+    (void)func;
+}
+
+int gpio_get_function(int pin) {
+    (void)pin;
+    return -1;
+}
+
+void gpio_set(int pin, int high) {
+    (void)pin;
+    (void)high;
+}
+
+int gpio_get(int pin) {
+    (void)pin;
+    return 0;
+}
+
+void gpio_set_pull(int pin, int pull) {
+    (void)pin;
+    (void)pull;
+}
+
+void gpio_set_pull_mask(uint32_t pins_mask, int bank, int pull) {
+    (void)pins_mask;
+    (void)bank;
+    (void)pull;
+}
+
 // CPU Info
 const char *hal_get_cpu_name(void) {
     return "Cortex-A72";

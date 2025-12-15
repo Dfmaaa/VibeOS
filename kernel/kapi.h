@@ -177,6 +177,7 @@ typedef struct {
     void (*led_on)(void);
     void (*led_off)(void);
     void (*led_toggle)(void);
+    int (*led_status)(void);
 
     // Process control
     int (*kill_process)(int pid);                                // Kill a process by PID

@@ -1580,3 +1580,48 @@ Session 44: USB Keyboard Working on Real Pi Hardware!
   5. **USB Polling Timing** - With D-cache, CPU runs faster. Fixed `usleep()` to use DSB barriers for reliable system timer reads. Increased poll delay to 50μs.
 
   **Result**: Pi boots with D-cache enabled, ~100x faster memory access, USB keyboard/mouse working.
+
+## Session 52: GPIO Driver Expansion & LED Control
+
+**Goal**: Make GPIO driver more robust and general-purpose.
+
+### GPIO Driver Refactor (`kernel/hal/pizero2w/gpio.c`)
+- Expanded from LED-only to full GPIO API:
+  - `gpio_set_function(pin, func)` - Set any pin to INPUT/OUTPUT/ALT0-5
+  - `gpio_get_function(pin)` - Read current function
+  - `gpio_set(pin, high)` - Set output level
+  - `gpio_get(pin)` - Read input level
+  - `gpio_set_pull(pin, pull)` - Set pull-up/down/none for single pin
+  - `gpio_set_pull_mask(mask, bank, pull)` - Set pull for multiple pins efficiently
+- LED functions now use the general API internally
+- Added edge detect register definitions (for future interrupt support)
+
+### Code Deduplication
+- EMMC driver (`emmc.c`) now uses shared GPIO API instead of local register access
+- `setup_sd_gpio()` reduced from 20 lines to 6 lines
+
+### HAL Updates
+- Added GPIO constants to `hal.h`: GPIO_INPUT, GPIO_OUTPUT, GPIO_ALT0-5, GPIO_PULL_*
+- Added QEMU stubs in `platform.c` (no-ops since QEMU virt has no GPIO)
+- Added `hal_led_status()` to query LED state
+
+### New Userspace Tool (`user/bin/led.c`)
+- Replaced old `blink.c` with simpler `led` command
+- Usage: `led on`, `led off`, `led status`
+- Controls Pi ACT LED (GPIO 29, active-low)
+
+### Debugging Adventure
+- Timer tick was toggling LED every 10ms, overriding user commands
+- Fixed: GPIO 29 confirmed correct, active-low polarity
+- Heartbeat LED now toggles every 50ms (10Hz) - visible but not distracting
+
+### Files Modified
+- `kernel/hal/pizero2w/gpio.c` - Full GPIO API
+- `kernel/hal/pizero2w/emmc.c` - Use shared GPIO API
+- `kernel/hal/pizero2w/irq.c` - 10Hz heartbeat LED
+- `kernel/hal/qemu/platform.c` - GPIO stubs
+- `kernel/hal/hal.h` - GPIO API declarations
+- `kernel/kapi.h`, `kernel/kapi.c` - Added `led_status`
+- `user/lib/vibe.h` - Added `led_status` to userspace kapi
+- `user/bin/led.c` - New LED control tool (replaced blink.c)
+- `Makefile` - Build led instead of blink
