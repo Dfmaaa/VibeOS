@@ -257,8 +257,8 @@ static void on_timer_tick(void) {
     // This is much more efficient than SOF-based polling (1000 IRQs/sec)
     hal_usb_keyboard_tick();
 
-    // Preemptive scheduling - switch every 5 ticks (50ms timeslice)
-    if ((tick_count % 5) == 0) {
+    // Preemptive scheduling - switch every 20 ticks (200ms timeslice)
+    if ((tick_count % 20) == 0) {
         process_schedule_from_irq();
     }
 

@@ -2,7 +2,7 @@
  * VibeOS Process Management
  *
  * Preemptive multitasking - timer IRQ forces context switches.
- * Processes get ~10ms time slices (100Hz timer).
+ * Processes get 200ms time slices (100Hz timer, preempt every 20 ticks).
  */
 
 #ifndef PROCESS_H

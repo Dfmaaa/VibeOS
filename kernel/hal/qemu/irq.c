@@ -69,8 +69,8 @@ static void timer_handler(void) {
         console_blink_cursor();
     }
 
-    // Preemptive scheduling - switch every 5 ticks (50ms timeslice)
-    if ((timer_ticks % 5) == 0) {
+    // Preemptive scheduling - switch every 20 ticks (200ms timeslice)
+    if ((timer_ticks % 20) == 0) {
         process_schedule_from_irq();
     }
 
