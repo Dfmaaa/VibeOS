@@ -45,7 +45,9 @@ typedef struct vfs_node {
 void vfs_init(void);
 
 // Path operations
-vfs_node_t *vfs_lookup(const char *path);
+vfs_node_t *vfs_lookup(const char *path);           // Returns static node - do NOT free
+vfs_node_t *vfs_open_handle(const char *path);      // Allocates - must call vfs_close_handle
+void vfs_close_handle(vfs_node_t *node);            // Free handle from vfs_open_handle
 vfs_node_t *vfs_get_root(void);
 vfs_node_t *vfs_get_cwd(void);
 int vfs_set_cwd(const char *path);

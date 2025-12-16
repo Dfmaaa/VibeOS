@@ -42,6 +42,7 @@ typedef struct kapi {
 
     // Filesystem
     void *(*open)(const char *path);
+    void  (*close)(void *file);
     int   (*read)(void *file, char *buf, size_t size, size_t offset);
     int   (*write)(void *file, const char *buf, size_t size);
     int   (*is_dir)(void *node);

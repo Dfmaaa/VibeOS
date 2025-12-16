@@ -171,7 +171,11 @@ int process_create(const char *path, int argc, char **argv) {
     // Calculate how much memory the program needs
     uint64_t prog_size = elf_calc_size(data, size);
     if (prog_size == 0) {
-        printf("[PROC] Invalid ELF: %s\n", path);
+        int err = elf_validate(data, size);
+        printf("[PROC] Invalid ELF: %s (err=%d, size=%d)\n", path, err, (int)size);
+        uint8_t *b = (uint8_t*)data;
+        printf("[PROC] Header: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+               b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
         free(data);
         return -1;
     }

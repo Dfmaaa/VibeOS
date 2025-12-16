@@ -42,6 +42,7 @@ typedef struct {
 
     // Filesystem
     void *(*open)(const char *path);  // Returns vfs_node_t*
+    void  (*close)(void *file);       // Free vfs_node_t*
     int   (*read)(void *file, char *buf, size_t size, size_t offset);
     int   (*write)(void *file, const char *buf, size_t size);
     int   (*is_dir)(void *node);

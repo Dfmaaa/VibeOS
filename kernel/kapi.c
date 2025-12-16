@@ -98,9 +98,14 @@ static void kapi_set_color(uint32_t fg, uint32_t bg) {
     console_set_color(fg, bg);
 }
 
-// Wrapper for VFS open
+// Wrapper for VFS open (allocates handle)
 static void *kapi_open(const char *path) {
-    return (void *)vfs_lookup(path);
+    return (void *)vfs_open_handle(path);
+}
+
+// Wrapper for VFS close (frees handle)
+static void kapi_close(void *file) {
+    vfs_close_handle((vfs_node_t *)file);
 }
 
 // Wrapper for VFS read
@@ -211,6 +216,7 @@ void kapi_init(void) {
 
     // Filesystem
     kapi.open = kapi_open;
+    kapi.close = kapi_close;
     kapi.read = kapi_read;
     kapi.write = kapi_write;
     kapi.is_dir = kapi_is_dir;

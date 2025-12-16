@@ -502,3 +502,169 @@ print(m.group(0))  # "123"
 2. **modre.c #includes its dependencies** - don't compile re1.5 separately
 3. **Math functions need declarations** - add to math.h, not just stubs.c
 4. **Relocation debugging is valuable** - the ELF loader processes 2321 relocations correctly
+
+---
+
+## Session 60: TCC (Tiny C Compiler) Port
+
+**Goal**: Port TCC to VibeOS so users can compile C programs directly on the OS.
+
+### Why TCC?
+- Compile C code directly on VibeOS - no cross-compilation needed
+- Fast compilation (single-pass)
+- Tiny binary (~300KB)
+- Self-contained - no external dependencies
+- MIT licensed
+
+### Port Structure
+
+Created `tinycc/vibeos/` port directory:
+
+1. **`config.h`** - TCC configuration:
+   - `TCC_TARGET_ARM64` - AArch64 target
+   - `CONFIG_TCC_STATIC` - No dlopen
+   - `CONFIG_TCC_PIE` - Output PIE executables (required for VibeOS)
+   - `CONFIG_TCCDIR="/lib/tcc"` - Installation path
+   - Disabled: bounds checking, backtrace, semaphores
+
+2. **`tcc_libc.c`** - C library implementation (~1000 lines):
+   - File I/O: `fopen`, `fclose`, `fread`, `fwrite`, `fseek`, `ftell`
+   - String: `strlen`, `strcpy`, `strcmp`, `strcat`, `strstr`, `memcpy`, `memset`
+   - Memory: `malloc`, `free`, `realloc`, `calloc`
+   - Printf family: `sprintf`, `snprintf`, `fprintf`
+   - Conversion: `atoi`, `strtol`, `strtoul`
+   - Character: `isalpha`, `isdigit`, `isspace`, `tolower`, `toupper`
+   - Other: `qsort`, `abs`, `getenv`, `time`
+
+3. **`tcc_libc.h`** - Header with all declarations
+
+4. **`tcc_main.c`** - Entry point, receives kapi pointer
+
+5. **`setjmp.S`** - AArch64 setjmp/longjmp implementation
+
+6. **`Makefile`** - Builds TCC as PIE binary for VibeOS
+
+7. **`include/`** - Standard C headers (stdio.h, stdlib.h, string.h, etc.)
+
+8. **`libc.a`** / `libtcc1.a`** - Runtime libraries for compiled programs
+
+9. **`crti.S` / `crtn.S`** - C runtime init/fini stubs
+
+### Critical Bug #1: File Handle Sharing
+
+**Symptom**: All files returned same handle, causing "undefined symbol main" for every file.
+
+**Root cause**: `vfs_lookup()` returned pointer to static `temp_node` variable. All open files shared the same node.
+
+**Fix**: Created new VFS API specifically for TCC's file I/O needs:
+```c
+// kernel/vfs.c
+vfs_node_t *vfs_open_handle(const char *path);  // Allocates unique handle
+void vfs_close_handle(vfs_node_t *node);        // Frees handle
+```
+
+Added `kapi->close` to kernel API for handle cleanup.
+
+**Note**: This is a new API path used only by TCC. Existing apps continue using `kapi->open`/`vfs_lookup` which returns static nodes (works fine for read-only access).
+
+### Critical Bug #2: FAT32 Write Truncation
+
+**Symptom**: Compiled ELF was 149 bytes containing only ".text" string.
+
+**Root cause**: `kapi->write` (FAT32) overwrites file from beginning each time. TCC calls `fwrite` many times - only the last write survived.
+
+**Fix**: Buffer all writes in memory, flush entire buffer on `fclose`:
+```c
+// tcc_libc.c
+size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *f) {
+    // Grow buffer as needed
+    if (new_size > f->buf_size) {
+        f->buf = realloc(f->buf, new_size + 4096);
+    }
+    memcpy(f->buf + f->pos, ptr, total);
+    f->pos += total;
+    return nmemb;
+}
+
+int fclose(FILE *f) {
+    fflush(f);  // Write entire buffer to file
+    kapi->close(f->handle);
+    free(f->buf);
+    free(f);
+}
+```
+
+### Critical Bug #3: Non-PIE Output
+
+**Symptom**: TCC produced EXEC type ELF with fixed vaddr=0x400000. VibeOS needs PIE.
+
+**Fix**: Enable `CONFIG_TCC_PIE` in config.h and Makefile:
+```c
+#define CONFIG_TCC_PIE 1
+```
+
+This makes TCC set `output_type |= TCC_OUTPUT_DYN`, which sets base address to 0 (relocatable).
+
+### Project Reorganization
+
+Created `vibeos_root/` directory for disk content:
+- `vibeos_root/beep.wav` - Sound test file
+- `vibeos_root/duck.png` - Image test file
+- `vibeos_root/hello.c` - TCC test program
+- `vibeos_root/scripts/*.py` - MicroPython scripts
+
+Removed from project root (moved to vibeos_root):
+- `beep.wav`, `duck.*` images
+- `fonts/Roboto/` (unused font files)
+- `python/`, `scripts/` directories
+
+### Build System Changes
+
+Updated Makefile:
+- Added TCC build target (`tinycc/vibeos/build/tcc`)
+- Copy TCC and runtime to `/bin/tcc`, `/lib/tcc/`
+- Copy `vibeos_root/` contents to disk image
+- Detect TCC source changes for rebuild
+
+### Files Created
+- `tinycc/vibeos/*` - Complete TCC port
+- `user/lib/crti.S`, `user/lib/crtn.S` - CRT stubs
+- `vibeos_root/` - Disk content directory
+- `vibeos_root/hello.c` - Test program
+
+### Files Modified
+- `kernel/vfs.c` - Added `vfs_open_handle()`, `vfs_close_handle()`
+- `kernel/vfs.h` - Function declarations
+- `kernel/kapi.c` - Added `kapi_close` wrapper
+- `kernel/kapi.h` - Added `close` to kapi_t struct
+- `user/lib/vibe.h` - Added `close` to kapi_t struct
+- `kernel/process.c` - Added ELF validation debug output
+- `Makefile` - TCC integration, vibeos_root copying
+- `.gitignore` - Build artifacts, disk mount points
+
+### Usage
+
+```bash
+# In VibeOS shell:
+cd /home/user
+tcc hello.c -o hello
+./hello
+```
+
+### What Works
+- Compiling simple C programs
+- PIE output that loads at any address
+- Access to kernel API via kapi pointer
+- Standard C library functions
+
+### What's Next
+- Test more complex programs
+- Add more libc functions as needed
+- Potentially self-host TCC (compile TCC with TCC)
+
+### Lessons Learned
+1. **VFS handle sharing** - Static nodes work for read-only, but writers need unique handles
+2. **FAT32 write semantics** - Must buffer writes and flush entire file at once
+3. **PIE is essential** - VibeOS loads programs at dynamic addresses, fixed vaddr breaks everything
+4. **Debug output to UART** - Console output may not work during compilation, use `kapi->uart_puts`
+5. **TCC's architecture** - Clean separation of compiler core vs platform support

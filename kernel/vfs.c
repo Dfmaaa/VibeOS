@@ -184,11 +184,12 @@ void vfs_init(void) {
     printf("[VFS] %s, cwd=%s\n", use_fat32 ? "FAT32" : "in-memory", cwd_path);
 }
 
-// Resolve a path to a node
-// For FAT32, we return a temporary node with info
-// For in-memory, we return the actual node
+// Resolve a path to a node (returns static/cached node - do NOT free)
+// For FAT32, returns a static temp node
+// For in-memory, returns the actual node
 vfs_node_t *vfs_lookup(const char *path) {
     static vfs_node_t temp_node;
+    static char stored_path[VFS_MAX_PATH];
     char fullpath[VFS_MAX_PATH];
 
     // Build full path
@@ -242,7 +243,7 @@ vfs_node_t *vfs_lookup(const char *path) {
             return NULL;  // Not found
         }
 
-        // Create temporary node with info
+        // Use static node for lookup (not for file handles!)
         memset(&temp_node, 0, sizeof(temp_node));
 
         // Extract name from path
@@ -261,15 +262,46 @@ vfs_node_t *vfs_lookup(const char *path) {
             temp_node.size = fat32_file_size(normalized);
         }
 
-        // Store the full path in a static buffer for later use
-        static char stored_path[VFS_MAX_PATH];
+        // Store path in static buffer
         strcpy(stored_path, normalized);
-        temp_node.data = stored_path;  // Hack: store path in data pointer
+        temp_node.data = stored_path;
 
         return &temp_node;
     } else {
         return mem_lookup(normalized);
     }
+}
+
+// Open a file handle (allocates - caller must free with vfs_close_handle)
+// This is for kapi->open, NOT for internal kernel lookups
+vfs_node_t *vfs_open_handle(const char *path) {
+    // First do a lookup to check if file exists and get info
+    vfs_node_t *temp = vfs_lookup(path);
+    if (!temp) return NULL;
+
+    // Allocate a new node for this handle
+    vfs_node_t *node = malloc(sizeof(vfs_node_t));
+    if (!node) return NULL;
+
+    // Copy the temp node data
+    memcpy(node, temp, sizeof(vfs_node_t));
+
+    // Allocate and copy the path
+    if (temp->data) {
+        char *path_copy = malloc(VFS_MAX_PATH);
+        if (!path_copy) { free(node); return NULL; }
+        strcpy(path_copy, (char*)temp->data);
+        node->data = path_copy;
+    }
+
+    return node;
+}
+
+// Close/free a handle returned by vfs_open_handle
+void vfs_close_handle(vfs_node_t *node) {
+    if (!node) return;
+    if (node->data) free(node->data);
+    free(node);
 }
 
 vfs_node_t *vfs_get_root(void) {
