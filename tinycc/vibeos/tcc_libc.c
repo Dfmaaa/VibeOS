@@ -18,6 +18,25 @@ void debug_puts(const char *s) {
     if (tcc_kapi) tcc_kapi->uart_puts(s);
 }
 
+/* Console output helpers - use stdio hooks if available (for terminal emulator) */
+static void tcc_putc(char c) {
+    if (!tcc_kapi) return;
+    if (tcc_kapi->stdio_putc) {
+        tcc_kapi->stdio_putc(c);
+    } else {
+        tcc_kapi->putc(c);
+    }
+}
+
+static void tcc_puts(const char *s) {
+    if (!tcc_kapi) return;
+    if (tcc_kapi->stdio_puts) {
+        tcc_kapi->stdio_puts(s);
+    } else {
+        tcc_kapi->puts(s);
+    }
+}
+
 /* ============ File descriptor table ============ */
 
 #define MAX_FDS 32
@@ -355,7 +374,7 @@ int abs(int x) { return x < 0 ? -x : x; }
 long labs(long x) { return x < 0 ? -x : x; }
 
 void abort(void) {
-    if (tcc_kapi) tcc_kapi->puts("ABORT\n");
+    tcc_puts("ABORT\n");
     while (1) {}
 }
 
@@ -500,12 +519,12 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *f) {
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *f) {
     if (!f || !tcc_kapi) return 0;
 
-    /* stdout/stderr -> console */
+    /* stdout/stderr -> console (use stdio hooks if available) */
     if (f == stdout || f == stderr) {
         const char *s = ptr;
         size_t total = size * nmemb;
         for (size_t i = 0; i < total; i++) {
-            tcc_kapi->putc(s[i]);
+            tcc_putc(s[i]);
         }
         return nmemb;
     }
@@ -636,11 +655,11 @@ int setvbuf(FILE *f, char *buf, int mode, size_t size) {
 void perror(const char *s) {
     if (tcc_kapi) {
         if (s && *s) {
-            tcc_kapi->puts(s);
-            tcc_kapi->puts(": ");
+            tcc_puts(s);
+            tcc_puts(": ");
         }
-        tcc_kapi->puts(strerror(errno));
-        tcc_kapi->putc('\n');
+        tcc_puts(strerror(errno));
+        tcc_putc('\n');
     }
 }
 
@@ -968,11 +987,11 @@ ssize_t read(int fd, void *buf, size_t count) {
 ssize_t write(int fd, const void *buf, size_t count) {
     if (!tcc_kapi) return -1;
 
-    /* stdout/stderr */
+    /* stdout/stderr (use stdio hooks if available) */
     if (fd == 1 || fd == 2) {
         const char *s = buf;
         for (size_t i = 0; i < count; i++) {
-            tcc_kapi->putc(s[i]);
+            tcc_putc(s[i]);
         }
         return count;
     }
