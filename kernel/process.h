@@ -78,6 +78,9 @@ void process_exit(int status);
 process_t *process_current(void);
 process_t *process_get(int pid);
 
+// Current running process (NULL if kernel)
+extern process_t *current_process;
+
 // Get pointer to current_process pointer (for assembly IRQ handler)
 process_t **process_get_current_ptr(void);
 
