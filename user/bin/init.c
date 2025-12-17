@@ -108,12 +108,7 @@ int main(kapi_t *k, int argc, char **argv) {
 
     api->puts("init: ");
     api->print_int(spawned);
-    api->puts(" program(s) started, entering idle loop\n");
-
-    // Loop forever - init should never exit
-    while (1) {
-        api->yield();
-    }
+    api->puts(" program(s) started\n");
 
     return 0;
 }
