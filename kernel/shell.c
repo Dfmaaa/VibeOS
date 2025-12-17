@@ -1,8 +1,8 @@
 /*
  * VibeOS Shell Bootstrap
  *
- * Launches /bin/vibesh on boot. Falls back to a minimal recovery shell
- * if vibesh is not found.
+ * Launches /bin/init on boot. Falls back to /bin/vibesh if init is not found,
+ * then to a minimal recovery shell.
  */
 
 #include "shell.h"
@@ -29,20 +29,29 @@ void shell_run(void) {
     console_puts("VibeOS v0.1\n");
     console_set_color(COLOR_WHITE, COLOR_BLACK);
 
-    // Try to launch vibesh
-    vfs_node_t *vibesh = vfs_lookup("/bin/vibesh");
-    if (vibesh) {
-        console_puts("Starting vibesh...\n\n");
-        int result = process_exec("/bin/vibesh");
+    // Try to launch init
+    vfs_node_t *init = vfs_lookup("/bin/init");
+    if (init) {
+        console_puts("Starting init...\n\n");
+        int result = process_exec("/bin/init");
 
-        // If we get here, vibesh exited
-        console_puts("\nvibesh exited with status ");
+        // If we get here, init exited (should never happen)
+        console_puts("\ninit exited with status ");
         printf("%d\n", result);
     } else {
-        console_set_color(COLOR_RED, COLOR_BLACK);
-        console_puts("ERROR: /bin/vibesh not found!\n");
-        console_set_color(COLOR_WHITE, COLOR_BLACK);
-        console_puts("Make sure to run 'make install-user' to install userspace programs.\n");
+        // Fall back to vibesh if init not found
+        vfs_node_t *vibesh = vfs_lookup("/bin/vibesh");
+        if (vibesh) {
+            console_puts("Starting vibesh (init not found)...\n\n");
+            int result = process_exec("/bin/vibesh");
+            console_puts("\nvibesh exited with status ");
+            printf("%d\n", result);
+        } else {
+            console_set_color(COLOR_RED, COLOR_BLACK);
+            console_puts("ERROR: Neither /bin/init nor /bin/vibesh found!\n");
+            console_set_color(COLOR_WHITE, COLOR_BLACK);
+            console_puts("Make sure to run 'make install-user' to install userspace programs.\n");
+        }
     }
 
     // Fallback: minimal recovery loop

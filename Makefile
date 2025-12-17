@@ -64,7 +64,7 @@ HAL_C_SRCS = $(wildcard $(HAL_DIR)/$(HAL_PLATFORM)/*.c)
 HAL_USB_C_SRCS = $(wildcard $(HAL_DIR)/$(HAL_PLATFORM)/usb/*.c)
 
 # Userspace programs (single-file)
-USER_PROGS = snake tetris desktop calc vibesh echo ls cat pwd mkdir touch rm term uptime sysmon textedit files date play music ping fetch viewer vim led \
+USER_PROGS = init snake tetris desktop calc vibesh echo ls cat pwd mkdir touch rm term uptime sysmon textedit files date play music ping fetch viewer vim led \
              clear yes sleep seq whoami hostname uname which basename dirname \
              head tail wc df free ps stat grep find hexdump du cp mv kill lscpu lsusb dmesg mousetest readtest vibecode browser explode help
 
