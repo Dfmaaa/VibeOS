@@ -94,6 +94,7 @@ typedef struct {
 typedef struct {
     int x, y, w, h;
     const char *label;
+    int label_len;        // Cached strlen(label)
     const char *exec_path;
     int is_fullscreen;    // If true, use exec() instead of spawn()
 } dock_icon_t;
@@ -247,10 +248,22 @@ static void draw_vibeos_logo(int x, int y) {
 static void draw_icon_bitmap(int x, int y, const unsigned char *bitmap, uint32_t bg_color) {
     uint32_t fg = COLOR_BLACK;
 
-    for (int py = 0; py < 32; py++) {
-        for (int px = 0; px < 32; px++) {
-            uint32_t color = bitmap[py * 32 + px] ? fg : bg_color;
-            bb_put_pixel(x + px, y + py, color);
+    // Fast path: icon fully visible (no bounds checking per pixel)
+    if (x >= 0 && y >= 0 && x + 32 <= SCREEN_WIDTH && y + 32 <= SCREEN_HEIGHT) {
+        for (int py = 0; py < 32; py++) {
+            uint32_t *row = &backbuffer[(y + py) * SCREEN_WIDTH + x];
+            const unsigned char *src = &bitmap[py * 32];
+            for (int px = 0; px < 32; px++) {
+                row[px] = src[px] ? fg : bg_color;
+            }
+        }
+    } else {
+        // Slow path with bounds checking (rare - icon near edge)
+        for (int py = 0; py < 32; py++) {
+            for (int px = 0; px < 32; px++) {
+                uint32_t color = bitmap[py * 32 + px] ? fg : bg_color;
+                bb_put_pixel(x + px, y + py, color);
+            }
         }
     }
 }
@@ -455,32 +468,43 @@ static void wm_window_set_title(int wid, const char *title) {
 #define DOCK_PADDING 32   // Spacing between icons (enough for labels)
 #define DOCK_LABEL_HEIGHT 14
 
-// Dock icons with bitmap indices
+// Dock icons with bitmap indices (label_len computed at init)
 static dock_icon_t dock_icons[] = {
-    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Snake",    "/bin/snake",    1 },
-    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Tetris",   "/bin/tetris",   1 },
-    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "DOOM",     "/bin/doom",     1 },
-    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Calc",     "/bin/calc",     0 },
-    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Files",    "/bin/files",    0 },
-    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Music",    "/bin/music",    0 },
-    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Browser",  "/bin/browser",  0 },
-    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Term",     "/bin/term",     0 },
-    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "SysMon",   "/bin/sysmon",   0 },
-    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "VibeCode", "/bin/vibecode", 0 },
-    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Help",     "/bin/help",     0 },
+    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Snake",    0, "/bin/snake",    1 },
+    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Tetris",   0, "/bin/tetris",   1 },
+    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "DOOM",     0, "/bin/doom",     1 },
+    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Calc",     0, "/bin/calc",     0 },
+    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Files",    0, "/bin/files",    0 },
+    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Music",    0, "/bin/music",    0 },
+    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Browser",  0, "/bin/browser",  0 },
+    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Term",     0, "/bin/term",     0 },
+    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "SysMon",   0, "/bin/sysmon",   0 },
+    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "VibeCode", 0, "/bin/vibecode", 0 },
+    { 0, 0, DOCK_ICON_SIZE, DOCK_ICON_SIZE, "Help",     0, "/bin/help",     0 },
 };
 #define NUM_DOCK_ICONS (sizeof(dock_icons) / sizeof(dock_icons[0]))
 
+// Cached dock dimensions (computed once at init)
+static int dock_content_w, dock_pill_x, dock_pill_y, dock_pill_h;
+static const int dock_pill_r = 16;  // Corner radius
+
 static void init_dock_positions(void) {
+    // Cache dock pill dimensions
+    dock_content_w = NUM_DOCK_ICONS * (DOCK_ICON_SIZE + DOCK_PADDING) - DOCK_PADDING + 40;
+    dock_pill_x = (SCREEN_WIDTH - dock_content_w) / 2;
+    dock_pill_y = SCREEN_HEIGHT - DOCK_HEIGHT + 6;
+    dock_pill_h = DOCK_HEIGHT - 12;
+
+    // Icon positions
     int total_width = NUM_DOCK_ICONS * (DOCK_ICON_SIZE + DOCK_PADDING) - DOCK_PADDING + 32;
     int start_x = (SCREEN_WIDTH - total_width) / 2 + 16;
-    // Position icons near top of dock pill so labels fit inside
-    int dock_y = SCREEN_HEIGHT - DOCK_HEIGHT + 6;  // Dock pill top
-    int y = dock_y + 4;  // Minimal top padding
+    int y = dock_pill_y + 4;  // Minimal top padding
 
     for (int i = 0; i < (int)NUM_DOCK_ICONS; i++) {
         dock_icons[i].x = start_x + i * (DOCK_ICON_SIZE + DOCK_PADDING);
         dock_icons[i].y = y;
+        // Cache label length
+        dock_icons[i].label_len = strlen(dock_icons[i].label);
     }
 }
 
@@ -494,9 +518,8 @@ static void draw_dock_icon(dock_icon_t *icon, int icon_idx, int highlight) {
     // Draw the bitmap icon with dock background color
     draw_icon_bitmap(icon->x, icon->y, icon_bitmaps[icon_idx], COLOR_DOCK_BG);
 
-    // Draw label below icon
-    int label_len = strlen(icon->label);
-    int label_x = icon->x + (DOCK_ICON_SIZE - label_len * 8) / 2;
+    // Draw label below icon (using cached label_len)
+    int label_x = icon->x + (DOCK_ICON_SIZE - icon->label_len * 8) / 2;
     int label_y = icon->y + DOCK_ICON_SIZE + 4;
 
     for (int i = 0; icon->label[i]; i++) {
@@ -505,23 +528,20 @@ static void draw_dock_icon(dock_icon_t *icon, int icon_idx, int highlight) {
     }
 }
 
-static void draw_dock(void) {
-    // Calculate dock pill dimensions
-    int dock_content_w = NUM_DOCK_ICONS * (DOCK_ICON_SIZE + DOCK_PADDING) - DOCK_PADDING + 40;
-    int dock_x = (SCREEN_WIDTH - dock_content_w) / 2;
-    int dock_y = SCREEN_HEIGHT - DOCK_HEIGHT + 6;
-    int dock_h = DOCK_HEIGHT - 12;
-    int dock_r = 16;  // Corner radius
+// Track minimized window count (avoids counting every frame)
+static int minimized_count = 0;
 
+static void draw_dock(void) {
+    // Use cached dock pill dimensions
     // Draw subtle shadow first
-    bb_box_shadow_rounded(dock_x, dock_y, dock_content_w, dock_h, dock_r,
+    bb_box_shadow_rounded(dock_pill_x, dock_pill_y, dock_content_w, dock_pill_h, dock_pill_r,
                           4, 0, 2, 0x00999999);
 
     // Solid background (no alpha - matches icon/text backgrounds exactly)
-    bb_fill_rounded(dock_x, dock_y, dock_content_w, dock_h, dock_r, COLOR_DOCK_BG);
+    bb_fill_rounded(dock_pill_x, dock_pill_y, dock_content_w, dock_pill_h, dock_pill_r, COLOR_DOCK_BG);
 
     // Subtle border
-    bb_draw_rounded(dock_x, dock_y, dock_content_w, dock_h, dock_r, COLOR_DOCK_BORDER);
+    bb_draw_rounded(dock_pill_x, dock_pill_y, dock_content_w, dock_pill_h, dock_pill_r, COLOR_DOCK_BORDER);
 
     // Icons
     for (int i = 0; i < (int)NUM_DOCK_ICONS; i++) {
@@ -532,16 +552,11 @@ static void draw_dock(void) {
         draw_dock_icon(&dock_icons[i], i, highlight);
     }
 
-    // Draw separator if there are minimized windows
-    int min_count = 0;
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-        if (windows[i].active && windows[i].minimized) min_count++;
-    }
-
-    if (min_count > 0) {
+    // Draw separator if there are minimized windows (using cached count)
+    if (minimized_count > 0) {
         // Separator line
-        int sep_x = dock_x + dock_content_w - 4;
-        bb_draw_vline(sep_x, dock_y + 10, dock_h - 20, COLOR_DOCK_BORDER);
+        int sep_x = dock_pill_x + dock_content_w - 4;
+        bb_draw_vline(sep_x, dock_pill_y + 10, dock_pill_h - 20, COLOR_DOCK_BORDER);
 
         // Draw minimized windows to the right
         int min_x = sep_x + 8;
@@ -550,7 +565,7 @@ static void draw_dock(void) {
                 // Small window preview
                 int min_w = 40;
                 int min_h = 30;
-                int min_y = dock_y + (dock_h - min_h) / 2;
+                int min_y = dock_pill_y + (dock_pill_h - min_h) / 2;
 
                 // Check hover
                 int hovering = (mouse_x >= min_x && mouse_x < min_x + min_w &&
@@ -622,25 +637,15 @@ static void draw_dock_context_menu(void) {
 
 // Check if click is on a minimized window in dock, return window id or -1
 static int minimized_window_at_point(int x, int y) {
-    // Calculate dock dimensions (same as draw_dock)
-    int dock_content_w = NUM_DOCK_ICONS * (DOCK_ICON_SIZE + DOCK_PADDING) - DOCK_PADDING + 40;
-    int dock_x = (SCREEN_WIDTH - dock_content_w) / 2;
-    int dock_y = SCREEN_HEIGHT - DOCK_HEIGHT + 6;
-    int dock_h = DOCK_HEIGHT - 12;
+    // Use cached minimized_count
+    if (minimized_count == 0) return -1;
 
-    // Count minimized windows
-    int min_count = 0;
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-        if (windows[i].active && windows[i].minimized) min_count++;
-    }
-    if (min_count == 0) return -1;
-
-    // Check each minimized window
-    int sep_x = dock_x + dock_content_w - 4;
+    // Use cached dock dimensions
+    int sep_x = dock_pill_x + dock_content_w - 4;
     int min_x = sep_x + 8;
     int min_w = 40;
     int min_h = 30;
-    int min_y = dock_y + (dock_h - min_h) / 2;
+    int min_y = dock_pill_y + (dock_pill_h - min_h) / 2;
 
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (windows[i].active && windows[i].minimized) {
@@ -656,49 +661,45 @@ static int minimized_window_at_point(int x, int y) {
 
 // ============ Menu Bar ============
 
-// Format time string: "HH:MM" (5 chars + null)
-static void format_time(char *buf) {
-    int year, month, day, hour, minute, second, weekday;
-    api->get_datetime(&year, &month, &day, &hour, &minute, &second, &weekday);
+// Cached date/time strings (updated every second)
+static char cached_date[16];
+static char cached_time[8];
+static unsigned long last_datetime_update = 0;
 
-    buf[0] = '0' + (hour / 10);
-    buf[1] = '0' + (hour % 10);
-    buf[2] = ':';
-    buf[3] = '0' + (minute / 10);
-    buf[4] = '0' + (minute % 10);
-    buf[5] = '\0';
-}
-
-// Format date string: "Mon Dec 8" (max ~10 chars)
-static void format_date(char *buf) {
+// Update cached date/time strings (call once per second)
+static void update_datetime_cache(void) {
     static const char day_names[7][4] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     static const char month_names[12][4] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
     int year, month, day, hour, minute, second, weekday;
-    (void)year; (void)hour; (void)minute; (void)second;
+    (void)year;
     api->get_datetime(&year, &month, &day, &hour, &minute, &second, &weekday);
 
-    // Copy day name
-    buf[0] = day_names[weekday][0];
-    buf[1] = day_names[weekday][1];
-    buf[2] = day_names[weekday][2];
-    buf[3] = ' ';
+    // Format time: "HH:MM"
+    cached_time[0] = '0' + (hour / 10);
+    cached_time[1] = '0' + (hour % 10);
+    cached_time[2] = ':';
+    cached_time[3] = '0' + (minute / 10);
+    cached_time[4] = '0' + (minute % 10);
+    cached_time[5] = '\0';
 
-    // Copy month name
-    buf[4] = month_names[month - 1][0];
-    buf[5] = month_names[month - 1][1];
-    buf[6] = month_names[month - 1][2];
-    buf[7] = ' ';
-
-    // Day number
+    // Format date: "Mon Dec 8"
+    cached_date[0] = day_names[weekday][0];
+    cached_date[1] = day_names[weekday][1];
+    cached_date[2] = day_names[weekday][2];
+    cached_date[3] = ' ';
+    cached_date[4] = month_names[month - 1][0];
+    cached_date[5] = month_names[month - 1][1];
+    cached_date[6] = month_names[month - 1][2];
+    cached_date[7] = ' ';
     if (day >= 10) {
-        buf[8] = '0' + (day / 10);
-        buf[9] = '0' + (day % 10);
-        buf[10] = '\0';
+        cached_date[8] = '0' + (day / 10);
+        cached_date[9] = '0' + (day % 10);
+        cached_date[10] = '\0';
     } else {
-        buf[8] = '0' + day;
-        buf[9] = '\0';
+        cached_date[8] = '0' + day;
+        cached_date[9] = '\0';
     }
 }
 
@@ -803,19 +804,20 @@ static void draw_menu_bar(void) {
         bb_draw_string(EDIT_MENU_X, text_y, "Edit", COLOR_MENU_TEXT, COLOR_MENU_BG);
     }
 
-    // Date and time on right side
-    char date_buf[16];
-    char time_buf[8];
-    format_date(date_buf);
-    format_time(time_buf);
+    // Date and time on right side (using cached strings, update every 100 ticks = 1 sec)
+    unsigned long now = api->get_uptime_ticks();
+    if (now - last_datetime_update >= 100 || last_datetime_update == 0) {
+        update_datetime_cache();
+        last_datetime_update = now;
+    }
 
     // Draw date then time: "Mon Dec 8  12:00"
-    int date_len = strlen(date_buf);
+    int date_len = strlen(cached_date);
     int time_x = SCREEN_WIDTH - 56;  // Time on far right
     int date_x = time_x - (date_len * 8) - 16;  // Date with gap
 
-    bb_draw_string(date_x, text_y, date_buf, COLOR_MENU_TEXT, COLOR_MENU_BG);
-    bb_draw_string(time_x, text_y, time_buf, COLOR_MENU_TEXT, COLOR_MENU_BG);
+    bb_draw_string(date_x, text_y, cached_date, COLOR_MENU_TEXT, COLOR_MENU_BG);
+    bb_draw_string(time_x, text_y, cached_time, COLOR_MENU_TEXT, COLOR_MENU_BG);
 }
 
 static void draw_open_menu(void) {
@@ -830,12 +832,34 @@ static void draw_open_menu(void) {
 
 // ============ Window Drawing ============
 
-// Draw a filled circle
+// Precomputed corner insets for CORNER_RADIUS (10)
+// corner_insets[py] = how many pixels to inset from edge at row py
+static const int corner_insets[CORNER_RADIUS] = {5, 3, 2, 2, 1, 1, 1, 0, 0, 0};
+
+// Precomputed half-widths for traffic light button circles (r=6)
+// For each row from -6 to +6, the half-width of the circle
+static const int circle_r6_half[13] = {0, 3, 5, 5, 6, 6, 6, 6, 6, 5, 5, 3, 0};
+
+// Draw a filled circle using horizontal spans (optimized)
 static void draw_circle_filled(int cx, int cy, int r, uint32_t color) {
-    for (int y = -r; y <= r; y++) {
-        for (int x = -r; x <= r; x++) {
-            if (x * x + y * y <= r * r) {
-                bb_put_pixel(cx + x, cy + y, color);
+    if (r == 6) {
+        // Fast path for traffic light buttons (most common)
+        for (int dy = -6; dy <= 6; dy++) {
+            int half = circle_r6_half[dy + 6];
+            if (half > 0) {
+                bb_draw_hline(cx - half, cy + dy, half * 2 + 1, color);
+            }
+        }
+    } else {
+        // General case with horizontal spans
+        int r2 = r * r;
+        for (int dy = -r; dy <= r; dy++) {
+            int dy2 = dy * dy;
+            // Find half-width using integer math
+            int half = 0;
+            while ((half + 1) * (half + 1) + dy2 <= r2) half++;
+            if (half >= 0) {
+                bb_draw_hline(cx - half, cy + dy, half * 2 + 1, color);
             }
         }
     }
@@ -863,7 +887,7 @@ static void draw_window(int wid) {
     uint32_t title_top = is_focused ? 0x00E8E8E8 : 0x00F5F5F5;
     uint32_t title_bot = is_focused ? 0x00D0D0D0 : 0x00E8E8E8;
 
-    // Fill title bar area (we need to clip to rounded corners at top)
+    // Fill title bar area (using precomputed corner insets)
     for (int py = 0; py < TITLE_BAR_HEIGHT; py++) {
         uint8_t t = (py * 255) / (TITLE_BAR_HEIGHT > 1 ? TITLE_BAR_HEIGHT - 1 : 1);
         uint32_t color = gfx_lerp_color(title_top, title_bot, t);
@@ -871,21 +895,11 @@ static void draw_window(int wid) {
         int start_x = w->x;
         int end_x = w->x + w->w;
 
-        // Clip to rounded corners at top
+        // Use precomputed corner insets
         if (py < CORNER_RADIUS) {
-            int r = CORNER_RADIUS;
-            int dy = r - py;
-            // How much to inset from each side
-            int dx = r;
-            for (int i = 0; i < r; i++) {
-                int test_dx = r - i;
-                if (test_dx * test_dx + dy * dy <= r * r) {
-                    dx = i;
-                    break;
-                }
-            }
-            start_x += dx;
-            end_x -= dx;
+            int inset = corner_insets[py];
+            start_x += inset;
+            end_x -= inset;
         }
 
         bb_draw_hline(start_x, w->y + py, end_x - start_x, color);
@@ -965,7 +979,7 @@ static void draw_window(int wid) {
         }
     }
 
-    // Resize handle (bottom-right corner) - subtle dots
+    // Resize handle (bottom-right corner) - subtle dots (optimized with fill_rect)
     int rh_x = w->x + w->w - 14;
     int rh_y = w->y + w->h - 14;
     uint32_t dot_color = 0x00999999;
@@ -973,15 +987,32 @@ static void draw_window(int wid) {
         for (int col = row; col < 3; col++) {
             int dx = (2 - col) * 4 + 2;
             int dy = row * 4 + 2;
-            bb_put_pixel(rh_x + dx, rh_y + dy, dot_color);
-            bb_put_pixel(rh_x + dx + 1, rh_y + dy, dot_color);
-            bb_put_pixel(rh_x + dx, rh_y + dy + 1, dot_color);
-            bb_put_pixel(rh_x + dx + 1, rh_y + dy + 1, dot_color);
+            bb_fill_rect(rh_x + dx, rh_y + dy, 2, 2, dot_color);
         }
     }
 }
 
 // ============ Cursor ============
+
+// Shared cursor bitmap (1 = black outline, 2 = white fill, 0 = transparent)
+static const uint8_t cursor_bits[16 * 16] = {
+    1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    1,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    1,2,2,1,0,0,0,0,0,0,0,0,0,0,0,0,
+    1,2,2,2,1,0,0,0,0,0,0,0,0,0,0,0,
+    1,2,2,2,2,1,0,0,0,0,0,0,0,0,0,0,
+    1,2,2,2,2,2,1,0,0,0,0,0,0,0,0,0,
+    1,2,2,2,2,2,2,1,0,0,0,0,0,0,0,0,
+    1,2,2,2,2,2,2,2,1,0,0,0,0,0,0,0,
+    1,2,2,2,2,2,2,2,2,1,0,0,0,0,0,0,
+    1,2,2,2,2,2,1,1,1,1,1,0,0,0,0,0,
+    1,2,2,1,2,2,1,0,0,0,0,0,0,0,0,0,
+    1,2,1,1,2,2,1,0,0,0,0,0,0,0,0,0,
+    1,1,0,0,1,2,2,1,0,0,0,0,0,0,0,0,
+    1,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,
+};
 
 // Save the background under cursor position from a buffer
 static void save_cursor_bg(uint32_t *buffer, int x, int y) {
@@ -1015,26 +1046,6 @@ static void restore_cursor_bg(uint32_t *buffer) {
 
 // Draw cursor to a specific buffer
 static void draw_cursor_to_buffer(uint32_t *buffer, int x, int y) {
-    // Classic Mac-style arrow cursor
-    static const uint8_t cursor_bits[16 * 16] = {
-        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        1,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        1,2,2,1,0,0,0,0,0,0,0,0,0,0,0,0,
-        1,2,2,2,1,0,0,0,0,0,0,0,0,0,0,0,
-        1,2,2,2,2,1,0,0,0,0,0,0,0,0,0,0,
-        1,2,2,2,2,2,1,0,0,0,0,0,0,0,0,0,
-        1,2,2,2,2,2,2,1,0,0,0,0,0,0,0,0,
-        1,2,2,2,2,2,2,2,1,0,0,0,0,0,0,0,
-        1,2,2,2,2,2,2,2,2,1,0,0,0,0,0,0,
-        1,2,2,2,2,2,1,1,1,1,1,0,0,0,0,0,
-        1,2,2,1,2,2,1,0,0,0,0,0,0,0,0,0,
-        1,2,1,1,2,2,1,0,0,0,0,0,0,0,0,0,
-        1,1,0,0,1,2,2,1,0,0,0,0,0,0,0,0,
-        1,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,
-    };
-
     for (int py = 0; py < 16; py++) {
         for (int px = 0; px < 16; px++) {
             uint8_t c = cursor_bits[py * 16 + px];
@@ -1079,27 +1090,6 @@ static void update_cursor_only(int old_x, int old_y, int new_x, int new_y) {
 }
 
 static void draw_cursor(int x, int y) {
-    // Classic Mac-style arrow cursor as flat array (PIE-safe)
-    // 1 = black, 2 = white, 0 = transparent
-    static const uint8_t cursor_bits[16 * 16] = {
-        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        1,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        1,2,2,1,0,0,0,0,0,0,0,0,0,0,0,0,
-        1,2,2,2,1,0,0,0,0,0,0,0,0,0,0,0,
-        1,2,2,2,2,1,0,0,0,0,0,0,0,0,0,0,
-        1,2,2,2,2,2,1,0,0,0,0,0,0,0,0,0,
-        1,2,2,2,2,2,2,1,0,0,0,0,0,0,0,0,
-        1,2,2,2,2,2,2,2,1,0,0,0,0,0,0,0,
-        1,2,2,2,2,2,2,2,2,1,0,0,0,0,0,0,
-        1,2,2,2,2,2,1,1,1,1,1,0,0,0,0,0,
-        1,2,2,1,2,2,1,0,0,0,0,0,0,0,0,0,
-        1,2,1,1,2,2,1,0,0,0,0,0,0,0,0,0,
-        1,1,0,0,1,2,2,1,0,0,0,0,0,0,0,0,
-        1,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,
-    };
-
     for (int py = 0; py < 16; py++) {
         for (int px = 0; px < 16; px++) {
             uint8_t c = cursor_bits[py * 16 + px];
@@ -1185,18 +1175,13 @@ static void draw_about_dialog(void) {
     // Background (translucent white)
     bb_fill_rounded_alpha(x, y, ABOUT_W, ABOUT_H, r, 0x00FAFAFA, 250);
 
-    // Draw a big VibeOS logo in the dialog (3x size)
+    // Draw a big VibeOS logo in the dialog (3x size) - optimized with fill_rect
     int logo_x = x + (ABOUT_W - 48) / 2;  // 16*3 = 48
     int logo_y = y + 20;
     for (int py = 0; py < 16; py++) {
         for (int px = 0; px < 16; px++) {
             if (vibeos_logo[py * 16 + px]) {
-                // Draw it 3x size
-                for (int sy = 0; sy < 3; sy++) {
-                    for (int sx = 0; sx < 3; sx++) {
-                        bb_put_pixel(logo_x + px*3 + sx, logo_y + py*3 + sy, COLOR_MENU_TEXT);
-                    }
-                }
+                bb_fill_rect(logo_x + px*3, logo_y + py*3, 3, 3, COLOR_MENU_TEXT);
             }
         }
     }
@@ -1473,6 +1458,7 @@ static void handle_mouse_click(int x, int y, uint8_t buttons) {
         int min_wid = minimized_window_at_point(x, y);
         if (min_wid >= 0) {
             windows[min_wid].minimized = 0;
+            minimized_count--;
             bring_to_front(min_wid);
             request_redraw();
             return;
@@ -1521,6 +1507,7 @@ static void handle_mouse_click(int x, int y, uint8_t buttons) {
             if (dx * dx + dy * dy <= btn_r * btn_r) {
                 // Minimize window
                 w->minimized = 1;
+                minimized_count++;
                 // Update focus to next window
                 focused_window = -1;
                 for (int i = 0; i < window_count; i++) {
