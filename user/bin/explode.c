@@ -16,9 +16,9 @@ int main(kapi_t *k, int argc, char **argv) {
 
     vibe_puts(k, "kernel panic\n");
 
-    // Crash by dereferencing null pointer
-    volatile int *kaboom = (volatile int *)0;
-    *kaboom = 0xDEAD;
+    // Crash by calling invalid address
+    void (*kaboom)(void) = (void (*)(void))0xDEADBEEF;
+    kaboom();
 
     return 0;
 }
