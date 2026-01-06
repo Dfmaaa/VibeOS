@@ -1,7 +1,7 @@
 /*
  * VibeOS Music Player
  *
- * Classic Mac System 7 style - 1-bit black & white
+ * GUI music player with album browser, MP3/WAV playback.
  */
 
 #include "../lib/vibe.h"

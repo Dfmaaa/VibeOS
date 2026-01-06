@@ -11,7 +11,7 @@
 VibeOS is a hobby operating system built from scratch for aarch64 (ARM64), targeting QEMU's virt machine. This is a science experiment to see what an LLM can build.
 
 ## The Vibe
-- **Aesthetic**: Retro Mac System 7 / Apple Lisa (1-bit black & white, Chicago-style fonts, classic Mac UI)
+- **Aesthetic**: Modern macOS-inspired (draggable windows, dock, menu bar)
 - **Philosophy**: Simple, educational, nostalgic
 - **NOT trying to be**: Linux, production-ready, or modern
 

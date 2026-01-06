@@ -42,7 +42,7 @@ VibeOS is an operating system written from scratch for ARM64 (aarch64). It runs 
 **Development**
 - TCC (Tiny C Compiler) - compile C programs directly on VibeOS
 - MicroPython interpreter with full kernel API bindings
-- 47 userspace programs (coreutils, games, GUI apps)
+- 60+ userspace programs (coreutils, games, GUI apps)
 
 **Hardware**
 - Runs on Raspberry Pi Zero 2W

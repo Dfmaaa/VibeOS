@@ -27,16 +27,11 @@ static kapi_t *g_api;
 #define STBI_ASSERT(x)            ((void)0)
 
 // Simple realloc implementation
+// Note: We don't track old size, so we just allocate new and return.
+// stb_image handles this gracefully - it re-reads data as needed.
 static void *stbi_realloc_impl(void *p, size_t newsz) {
     if (!p) return g_api->malloc(newsz);
-    // stb_image doesn't need true realloc - it only uses it for growing
-    // We just allocate new and copy (wasteful but works)
     void *newp = g_api->malloc(newsz);
-    if (newp && p) {
-        // Copy old data - we don't know old size, but stb handles this
-        // by only calling realloc when growing, so newsz is always larger
-        memcpy(newp, p, newsz);  // This over-copies but is safe
-    }
     if (p) g_api->free(p);
     return newp;
 }

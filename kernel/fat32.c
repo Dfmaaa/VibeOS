@@ -1,7 +1,7 @@
 /*
  * VibeOS FAT32 Filesystem Driver
  *
- * Read-only FAT32 implementation.
+ * Full read/write FAT32 implementation.
  * Supports long filenames (LFN) and standard 8.3 names.
  */
 

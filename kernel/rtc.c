@@ -2,14 +2,13 @@
  * VibeOS RTC Driver
  *
  * PL031 Real Time Clock driver for QEMU virt machine.
- * Address: 0x0A000000
+ * Address: 0x09010000
  */
 
 #include "rtc.h"
 #include "printf.h"
 
 // PL031 RTC registers (QEMU virt machine)
-// RTC is at 0x09010000, NOT 0x0A000000 (that's something else!)
 #define RTC_BASE    0x09010000UL
 #define RTC_DR      (*(volatile uint32_t *)(RTC_BASE + 0x000))  // Data Register (read = current time)
 #define RTC_MR      (*(volatile uint32_t *)(RTC_BASE + 0x004))  // Match Register

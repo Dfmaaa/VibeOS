@@ -1,8 +1,7 @@
 /*
  * VibeOS Desktop - Window Manager
  *
- * Classic Mac System 7 aesthetic - TRUE 1-bit black & white.
- * Manages windows for GUI apps, dock, menu bar.
+ * macOS-inspired desktop with dock, menu bar, and draggable windows.
  *
  * Fullscreen apps (snake, tetris) are launched with exec() and take over.
  * Windowed apps use the window API registered in kapi.
