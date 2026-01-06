@@ -29,6 +29,14 @@ static mp_obj_t mod_vibe_puts(mp_obj_t s_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_vibe_puts_obj, mod_vibe_puts);
 
+// vibe.uart_puts(s) - direct UART output for debugging
+static mp_obj_t mod_vibe_uart_puts(mp_obj_t s_obj) {
+    const char *s = mp_obj_str_get_str(s_obj);
+    mp_vibeos_api->uart_puts(s);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_vibe_uart_puts_obj, mod_vibe_uart_puts);
+
 // vibe.clear()
 static mp_obj_t mod_vibe_clear(void) {
     mp_vibeos_api->clear();
@@ -1006,6 +1014,7 @@ static const mp_rom_map_elem_t mp_module_vibe_globals_table[] = {
     // Console I/O
     { MP_ROM_QSTR(MP_QSTR_putc), MP_ROM_PTR(&mod_vibe_putc_obj) },
     { MP_ROM_QSTR(MP_QSTR_puts), MP_ROM_PTR(&mod_vibe_puts_obj) },
+    { MP_ROM_QSTR(MP_QSTR_uart_puts), MP_ROM_PTR(&mod_vibe_uart_puts_obj) },
     { MP_ROM_QSTR(MP_QSTR_clear), MP_ROM_PTR(&mod_vibe_clear_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_color), MP_ROM_PTR(&mod_vibe_set_color_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_cursor), MP_ROM_PTR(&mod_vibe_set_cursor_obj) },
@@ -1140,6 +1149,7 @@ static const mp_rom_map_elem_t mp_module_vibe_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_WIN_EVENT_CLOSE), MP_ROM_INT(5) },
     { MP_ROM_QSTR(MP_QSTR_WIN_EVENT_FOCUS), MP_ROM_INT(6) },
     { MP_ROM_QSTR(MP_QSTR_WIN_EVENT_UNFOCUS), MP_ROM_INT(7) },
+    { MP_ROM_QSTR(MP_QSTR_WIN_EVENT_RESIZE), MP_ROM_INT(8) },
 
     // Mouse button constants
     { MP_ROM_QSTR(MP_QSTR_MOUSE_LEFT), MP_ROM_INT(0x01) },
