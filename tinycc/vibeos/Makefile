@@ -3,6 +3,7 @@
 # Cross compiler
 CC = aarch64-elf-gcc
 AS = aarch64-elf-as
+AR = aarch64-elf-ar
 LD = aarch64-elf-ld
 OBJCOPY = aarch64-elf-objcopy
 
@@ -83,7 +84,7 @@ ALL_OBJS = $(TCC_OBJS) $(PORT_OBJS) $(ASM_OBJS)
 
 .PHONY: all clean
 
-all: $(BUILD)/$(TARGET)
+all: $(BUILD)/$(TARGET) libtcc1.a libc.a
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -114,5 +115,18 @@ $(BUILD)/$(TARGET): $(CRT) $(ALL_OBJS)
 $(CRT):
 	$(MAKE) -C $(VIBEOS_ROOT) user/lib/crt0.o
 
+# Runtime libraries for TCC-compiled programs
+libtcc1.o: libtcc1.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+libtcc1.a: libtcc1.o
+	$(AR) rcs $@ $<
+
+libc_stub.o: libc_stub.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+libc.a: libc_stub.o
+	$(AR) rcs $@ $<
+
 clean:
-	rm -rf $(BUILD)
+	rm -rf $(BUILD) *.o *.a
